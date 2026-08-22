@@ -109,7 +109,7 @@ Everything above the cut-line works end to end before anything below it starts.
 | 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | ✅ built |
 | 7b | **Orchestrator** (`app/api/routes.py` + `app/main.py`) — items 1-7 assembled into one callable chain, `POST /agent/handle-event`; **owns the single ERP-write boundary** (rule 5) and the human-approval step `POST /agent/approval/{plan_id}` | enabler | ✅ built |
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
-| 8 | Staleness detector + earliest-conflict re-entry + post-replan verification | 10% | 2h |
+| 8 | Staleness detector + earliest-conflict re-entry + post-replan verification (`app/engine/staleness.py`; re-entry executed by the orchestrator) | 10% | ✅ built |
 | 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | 1h |
 | 10 | Tool-call precondition logging + count-vs-necessity summary in audit trail | 10% | 45m |
 | 11 | **Judge-controlled disruption panel** (single HTML file) | demo | 1h |
@@ -537,3 +537,72 @@ drawn first in §3 because it *initiates* the loop, but its gate is
 separate call: it is already embodied in MONITOR's load-bearing gate and
 VERIFY's reuse of MONITOR's tracking read. `PipelineRun.stages` records the
 sequence actually walked.
+
+---
+
+## 13. Staleness, re-entry, and why rule 5 tagging is load-bearing (item 8)
+
+`app/engine/staleness.py` answers two questions; `app/api/routes.py` executes
+the answer. The module decides *what is stale* and *where to re-enter*; the
+orchestrator only sequences.
+
+**A diff against current state, never a timer.** `capture_preconditions`
+records the exact field values a plan rests on when it is built;
+`detect_staleness` re-reads those same fields and reports what moved. Even
+quote expiry — the one check that touches the clock — compares against that
+quote's own `quote_issued_at + quote_valid_hours` (§5.7), a fact about the
+quote, not a replanning interval. A test strips docstrings and asserts no
+interval/TTL vocabulary appears in executable code.
+
+**Earliest-conflict mapping.** Each changed fact maps to the earliest stage
+it invalidates; `reentry_stage` is the minimum:
+
+| Fact that moved | Earliest invalid stage |
+|---|---|
+| inventory stock / usage / safety levels | COVERAGE |
+| production deadline / priority / demand | COVERAGE |
+| purchase-order status (dependable inbound set) | COVERAGE |
+| tracking status of a polled PO | MONITOR |
+| a new supplier claim on a load-bearing PO | VERIFY |
+| supplier price / lead time / availability / reliability / quality / certs | SOLVER |
+| a quote passing `quote_valid_hours` | SOLVER |
+| the approval threshold | RATCHET |
+
+Two look interchangeable and are not. **Tracking change → MONITOR**, because
+MONITOR is what physically reads tracking and VERIFY reuses that read; re-
+entering at VERIFY would hand it a stale value. **A new claim → VERIFY**,
+because MONITOR's read is still valid and only the assertion being compared
+changed.
+
+**Rule 5 tagging is not decoration — it prevents a real corruption.**
+
+| Stage | Tag | Why |
+|---|---|---|
+| COVERAGE / MONITOR / SOLVER / PLAN / RATCHET | `idempotent` | pure reads and computation; SOLVER and MONITOR spend tool calls but change no decision state |
+| **VERIFY** | **`compensable`** | it MUTATES `reliability_score` via the exponentially weighted update |
+| ERP_WRITE | `irreversible` | rule 5's one — not a re-enterable stage at all |
+
+VERIFY is genuinely not idempotent: re-running it on identical, unchanged
+evidence re-applies the update — **measured, not theorised: SUP-21 goes
+0.75 → 0.45 → 0.27 → 0.162 across three passes.** A naive "re-enter at
+COVERAGE and re-run everything below" rollback would therefore silently
+destroy supplier reliability scores every time an unrelated stock level
+moved. `stages_to_rerun` prevents it: a non-idempotent stage is re-run ONLY
+when a finding names it directly. After a COVERAGE-level re-entry the prior
+`VerificationReport` is reused — its conclusion is a fact about a tracking
+record that has not changed; what would be false is applying the penalty
+twice for the same evidence.
+
+**You cannot roll back past an irreversible write.** A plan already executed
+and then found stale is not undone. The replan produces a **superseding**
+plan and the POs the first one created stand (§5 excludes PO cancellation).
+Those POs are `pending` — a dependable inbound status — so the next coverage
+pass credits them automatically and the superseding plan accounts for stock
+already on order rather than double-buying.
+
+**Bounded, per rule 6.** `MAX_REENTRY_PASSES` caps replanning per call. It is
+a termination guarantee, not a threshold on anything measured. After each
+replan the NEW plan's preconditions are captured and re-checked — a second
+pass is not trusted for being second. Still stale at the bound is reported
+(`post_replan_verified=False` plus residual findings), not looped on: an
+environment moving faster than planning converges is itself the finding.

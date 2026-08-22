@@ -13,18 +13,18 @@ The open question this entry asked — *which ERP action follows each
 nothing at all on `escalate`.** See the two sign-off items below for the
 parts of that answer that are a judgement call rather than a given.
 
+## RESOLVED — `execute` now creates the POs
+
+- Signed off and built: `_write_erp_once` emits `store_plan` then one
+  `create_alternate_po` per `purchase_split`, carrying that split's own
+  supplier, quantity, unit_price, and `expected_delivery` = sim-clock now +
+  that supplier's `lead_time_days`. No approval ceiling (RATCHET already
+  authorised the total). PO ids come from `Store.update_erp`'s existing
+  anchor-safe range — this module passes no `po_id` and contains no id
+  arithmetic, so ARCHITECTURE.md §8's collision bug class cannot recur.
+
 ## NEEDS SIGN-OFF — orchestrator decisions I did not make unilaterally
 
-- [ ] **`execute` emits `store_plan` only — not `create_alternate_po` per
-      supplier split.** Recording the decided plan is unambiguous. Actually
-      *placing* the split POs would require the orchestrator to choose an
-      `expected_delivery` (now + lead_time_days?), a PO id, and an approval
-      ceiling for each split — plan-shaped logic the orchestrator is
-      explicitly not allowed to hold, and which nothing upstream currently
-      computes. If "execute" is supposed to mean POs actually get created,
-      that mapping needs to live in `planner.py` (as fields on
-      `PurchaseSplitAction`) and the orchestrator can then emit them
-      mechanically. Flagging rather than inventing the fields.
 - [ ] **The approval endpoint is `POST /agent/approval/{plan_id}`, not the
       bare `POST /approval/{plan_id}` that was requested.** The environment
       already serves the problem statement's own `POST /approval/check`
@@ -33,14 +33,13 @@ parts of that answer that are a judgement call rather than a given.
       route-ordering accident waiting to happen, and confusing to read.
       Namespaced under `/agent/` alongside the other orchestrator endpoints.
       Say if the bare path is required and I will add it as an alias.
-- [ ] **Run-cache idempotency is keyed on `component_id`.** Required to make
-      "fire the same disruption twice = one ERP write" true (a per-`plan_id`
-      guard alone cannot, because a second pipeline run mints a second
-      `plan_id`). The consequence: a genuinely NEW disruption on an
-      already-handled component currently returns the cached run instead of
-      replanning. **That is item 8's job to fix** — staleness detection is
-      exactly what should invalidate this cache. `reset_orchestrator_state()`
-      is the manual hook until then.
+- [x] ~~Run-cache idempotency keyed on `component_id` returns a stale run for
+      a genuinely new disruption~~ — **FIXED by item 8.** The cache is now
+      returned only when `detect_staleness` confirms the plan's preconditions
+      still hold; otherwise the pipeline re-enters at the earliest
+      invalidated stage. Both original guarantees survive: an UNCHANGED
+      component still returns the cached run (so "same disruption twice = one
+      write set" still holds), and a CHANGED one replans.
 
 ## RESOLVED — a real integration defect found while assembling the pipeline
 
@@ -55,18 +54,42 @@ parts of that answer that are a judgement call rather than a given.
   it injects on one side and reads results on the other. Guarded by
   `tests/test_orchestrator.py::test_environment_and_orchestrator_share_one_store`.
 
-## Owed by whoever builds item 8
+## NEEDS SIGN-OFF — found while building item 8
 
-- [ ] **A possible staleness trigger, not yet wired.** When VERIFY
-      (`app/engine/verify.py`) confirms a specific PO's claim is contradicted
-      (`ClaimVerification.contradicted=True`), should COVERAGE stop crediting
-      that PO's quantity — i.e. re-run `compute_coverage` with it excluded,
-      not just downgrade the supplier's reliability score? This is a
-      per-shipment fact, not a reliability-average threshold, so it does not
-      run into the rule-7 problem the reliability-coupling question did (see
-      `app/engine/verify.py`'s module docstring). Item 8's "re-enter at the
-      earliest invalidated stage" is the natural place for this, not a change
-      to `coverage.py`'s `dependable_inbound()` filter itself.
+- [ ] **VERIFY is not idempotent, and that is now load-bearing.** Re-running
+      `run_verification_cycle` on identical unchanged evidence re-applies the
+      exponentially weighted reliability update: SUP-21 goes 0.75 -> 0.45 ->
+      0.27 -> 0.162 across three passes. Item 8 works around this rather than
+      fixing it — `staleness.STAGE_REVERSIBILITY` tags VERIFY `compensable`
+      and the rollback rule refuses to re-run it unless a finding names it
+      directly (ARCHITECTURE.md §13). **The deeper fix would be to make the
+      reliability update idempotent on its evidence** — keyed on
+      (supplier_id, po_id, message_id, tracking_status), so re-observing the
+      SAME contradiction does not penalise twice. That is arguably what rule
+      4 already implies (one tracking record, one downgrade), but it changes
+      shipped item-3 behaviour and its tests (`test_verify.py::
+      test_repeated_cycles_on_an_unchanged_store_agree` currently ASSERTS the
+      double application), so it was not done unilaterally. Say the word and
+      it is a contained change to `verify.py` plus that one test.
+- [ ] **The staleness snapshot reads quotes from `store.rfq_log`, not from
+      `SolverResult`.** `SolverResult` does not retain the `RFQQuote` objects
+      the solve used, so `_latest_quote_expiry` takes the most recent quote
+      per (supplier, component) from the log — which IS the one the solve
+      used, because the snapshot is captured immediately after the solve. It
+      is correct but inferential. Adding `quotes_used: dict[str, RFQQuote]`
+      to `SolverResult` would make it direct; that touches shipped item-4
+      code, so it is flagged rather than done.
+
+## RESOLVED — item 8's staleness trigger question
+
+- The question logged here ("when VERIFY confirms a contradiction, should
+  COVERAGE stop crediting that PO?") is answered by the mechanism rather
+  than by a special case: `staleness._check_po_states` maps a PO status
+  change to COVERAGE, and `_check_tracking` maps a tracking change to
+  MONITOR. So when something actually changes the PO's standing, coverage is
+  recomputed through normal re-entry. What the orchestrator still does NOT do
+  is mark the PO delayed itself — that is an ERP write, and it must not
+  happen on the escalate path. See ARCHITECTURE.md §13.
 
 ## RESOLVED — deadline-miss gap, fixed by item 5's correction [3] + item 6
 
