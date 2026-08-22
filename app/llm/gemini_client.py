@@ -36,7 +36,13 @@ CLAIM_STATUSES: tuple[str, ...] = ("dispatched", "delayed", "cancelled", "confir
 
 # Pinned to what Task Zero validated. Changing this is a re-validation, not a
 # one-line edit — rerun scripts/task_zero_gemini_check.py after touching it.
-_MODEL = "gemini-3.6-flash"
+#
+# Public (not _-prefixed): this is the exact string ARCHITECTURE.md §7's
+# ProvenanceEdge.model_version field wants on a successful call
+# ("gemini-<version> | deterministic"). verify.py imports it rather than
+# hardcoding a second copy of the model name, so the two can't drift out of
+# sync if this is ever repinned.
+MODEL_VERSION = "gemini-3.6-flash"
 
 
 class LLMParsedClaim(BaseModel):
@@ -99,7 +105,7 @@ def parse_supplier_claim(message_body: str) -> LLMParsedClaim:
     )
 
     response = client.models.generate_content(
-        model=_MODEL,
+        model=MODEL_VERSION,
         contents=prompt,
         config=types.GenerateContentConfig(
             tools=[tool],

@@ -102,7 +102,7 @@ Everything above the cut-line works end to end before anything below it starts.
 | 2 | Coverage engine: **two metrics** — `days_of_coverage_on_hand` (usable ÷ daily usage) and `days_of_coverage` (+ dependable inbound). Thresholds are spec-field comparisons, never invented constants: `critical` = coverage < days_to_deadline; `at_risk` = projection dips below `safety_stock` before deadline. Plus ERP-vs-warehouse mismatch detection | 35% | ✅ built |
 | 2b | Gated polls on **load-bearing** POs — withdrawal alone turns some order critical. Broader than "thin-coverage POs" by design; the thin gate misses PO-7712 at Beat 1 | 35% + 10% | ✅ built |
 | 3 | Claim verification vs tracking; provenance-only reliability update, exponentially weighted `B(t+1) = (1−λ)B(t) + λs(t+1)`; probe only when a decision depends on the claim | 15% | 2h |
-| 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | 2.5h |
+| 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | ✅ built |
 | 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** | 35% | 2h |
 | 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | 30m |
 | 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | 1.5h |

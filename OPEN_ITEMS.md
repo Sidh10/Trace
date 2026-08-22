@@ -15,6 +15,60 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       earliest invalidated stage" is the natural place for this, not a change
       to `coverage.py`'s `dependable_inbound()` filter itself.
 
+## Needs a call — "certified" interpretation
+
+- [ ] `app/engine/solver.py`'s hard filter reads "certified" as "holds at
+      least one certification" (any cert, not specifically ISO-9001).
+      Grounded in `seed_data.py`'s own SUP-18 comment ("fails the
+      certified-supplier requirement, §6") and ARCHITECTURE.md §7's worked
+      example ("disqualified — uncertified") — both describe the failure as
+      lacking certification entirely, not lacking one specific credential.
+      This session doesn't have the literal problem-statement text to check
+      further. If §6 actually names a specific required certification
+      (ISO-9001, say), `_is_certified` in `solver.py` is a one-line fix, not
+      a design change — flagging so whoever DOES have that text can confirm
+      or correct it before the demo.
+
+## Owed by whoever builds item 5 (reads item 4's output)
+
+- [ ] **`solver.py` deliberately does not compute a dollar "saved" figure**
+      on rejected alternatives (`Rejection` has no `saved` field). Computing
+      "saved" requires knowing which option gets executed — a decision
+      `solver.py` doesn't make (it produces the Pareto SET, not a single
+      pick). Item 5/6 should compute `saved` against whatever it selects,
+      reading the comparable figures already on each `Rejection`
+      (`estimated_unit_price`, `estimated_total_price`, `lead_time_days`,
+      `reliability_score`, `quality_score`) rather than re-fetching or
+      re-deriving them.
+- [ ] **Combinations cap at 2 suppliers** (`MAX_COMBINATION_SIZE = 2`,
+      ARCHITECTURE.md §1's own justification: "~120 combinations for
+      ≤2-of-14 suppliers"). A shortfall too large for any single supplier or
+      pair to cover (rare given the seeded dataset's availability figures,
+      but possible after enough injected disruptions) will return an empty
+      `pareto_set` rather than a 3-way split. Item 5 should treat an empty
+      Pareto set as its own signal (likely feeding RATCHET's escalation
+      path, item 6) rather than assuming a plan always exists.
+- [ ] **Split allocation within a pair is cheapest-first, not optimized.**
+      `_allocate_pair` fills the cheaper of two suppliers first, up to its
+      availability, then the remainder to the other. This produces ONE
+      concrete, evaluable combination per pair — not a claim that it's the
+      only or best split of that pair. If item 5 wants a different
+      allocation within the same two suppliers (e.g. balancing lead time
+      instead of price), that's a new allocation rule, not a bug in this one.
+
+## Owed by whoever builds item 7
+
+- [ ] **`ParsedClaim.model_version` is ready for `ProvenanceEdge.model_version`
+      — read it, don't recompute it.** `verify.py`'s `parse_claim` now sets
+      `model_version` to `app.llm.gemini_client.MODEL_VERSION` (the real
+      pinned string, e.g. `"gemini-3.6-flash"`) on a genuine LLM success, and
+      the literal `"deterministic"` on every other path — LLM disabled, or
+      the LLM call raised and fell through. That's exactly ARCHITECTURE.md
+      §7's `"gemini-<version> | deterministic"` format. When building
+      `ProvenanceEdge`, populate `model_version` from
+      `ClaimVerification.claim.model_version`; don't re-derive it from
+      `parsed_by` or hardcode the model string a second time.
+
 ## Owed by person A (seed tuning — do not fix in the engine)
 
 - [ ] **Beat 1 board is not calm.** 4 of 5 generated production orders read
@@ -29,6 +83,18 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
 
 ## Signed off — no action, recorded so it isn't re-litigated
 
+- **`model_version` now distinguishes the LLM and deterministic paths in
+  the recorded output**, not just internally. `parsed_by` ("llm"/
+  "deterministic") already flipped correctly on fallback, but nothing
+  carried the literal model-version string §7 wants, and
+  `gemini_client.py`'s model constant was private — so item 7 would have had
+  no clean source to read a real `"gemini-3.6-flash"` from without
+  duplicating it. Fixed live, not hypothetically: while verifying this, the
+  Gemini free-tier quota (20 req/day) was already exhausted from earlier
+  testing — `parse_supplier_claim` raised `429 RESOURCE_EXHAUSTED`, the
+  fallback fired, and `model_version` correctly recorded `"deterministic"`
+  rather than silently claiming `"llm"`. Logged above under "Owed by
+  whoever builds item 7."
 - **"Dependable inbound" stays reliability-independent — resolved, not a
   gap.** `coverage.py`'s `dependable_inbound()` remains a pure PO-status
   filter; it will never read `reliability_score`, and does not read VERIFY's

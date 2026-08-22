@@ -36,17 +36,9 @@ from app.environment.seed_data import build_store
 
 NOW = datetime(2026, 9, 1, 8, 0, 0, tzinfo=timezone.utc)
 
-
-@pytest.fixture(autouse=True)
-def _llm_off_by_default(monkeypatch):
-    """AGENTS.md rule 2: the deterministic path is required, so it is also
-    this suite's default — fast and offline. `.env` ships
-    TRACE_LLM_ENABLED=true for the demo; without this, every test that
-    doesn't explicitly pin the flag would fall through to a LIVE Gemini call,
-    which is what made this suite take ~2 minutes on its first run instead of
-    under a second. Tests that specifically exercise the LLM path opt back in
-    with their own `monkeypatch.setattr(config, "TRACE_LLM_ENABLED", True)`."""
-    monkeypatch.setattr(config, "TRACE_LLM_ENABLED", False)
+# The LLM-off-by-default autouse fixture now lives in tests/conftest.py, so
+# every test file gets it automatically. Individual tests below still opt
+# back into the LLM path explicitly where they mean to exercise it.
 
 
 @pytest.fixture
@@ -107,6 +99,9 @@ def test_po_7712_contradiction_end_to_end(store, monkeypatch):
     assert verification.reliability_change_reason == "tracking_contradiction"
     assert store.suppliers["SUP-21"].reliability_score == verification.reliability_after
 
+    assert verification.claim.parsed_by == "deterministic"
+    assert verification.claim.model_version == "deterministic"
+
 
 def test_po_7712_llm_off_path_reaches_the_identical_verdict(store, monkeypatch):
     """AGENTS.md rule 2: the deterministic path is not a fallback bolted onto
@@ -142,6 +137,63 @@ def test_llm_failure_falls_through_to_deterministic(store, monkeypatch):
 
     assert claim.parsed_by == "deterministic"
     assert claim.claim_status == "dispatched"
+    # The signal a silent demo-time degradation would show up as: flag on,
+    # but the recorded provenance value reads "deterministic" anyway.
+    assert claim.model_version == "deterministic"
+
+
+# ==========================================================================
+# model_version — ARCHITECTURE.md §7's ProvenanceEdge field, populated early
+# ==========================================================================
+
+
+def test_model_version_is_the_real_pinned_string_on_llm_success(store, monkeypatch):
+    """On a genuine LLM success, model_version must be the actual pinned
+    model string gemini_client.py used for the call — imported from there,
+    not duplicated as a literal here, so this test can't drift out of sync
+    with a future repin the way a hardcoded "gemini-3.6-flash" would."""
+    from app.llm import gemini_client
+
+    monkeypatch.setattr(config, "TRACE_LLM_ENABLED", True)
+
+    def _fake_success(_message_body):
+        return gemini_client.LLMParsedClaim(
+            po_id="PO-7712", claim_status="dispatched", claimed_delay_days=0
+        )
+
+    monkeypatch.setattr("app.llm.gemini_client.parse_supplier_claim", _fake_success)
+
+    message = _elicit_sup21_dispatched_reply(store)
+    claim = parse_claim(message)
+
+    assert claim.parsed_by == "llm"
+    assert claim.model_version == gemini_client.MODEL_VERSION
+    assert claim.model_version != "deterministic"
+
+
+def test_model_version_is_literally_deterministic_when_llm_disabled(store):
+    """The default state (TRACE_LLM_ENABLED=false, conftest.py's autouse
+    fixture) must record the exact literal string ARCHITECTURE.md §7's
+    example gives for the non-LLM case."""
+    message = _elicit_sup21_dispatched_reply(store)
+    claim = parse_claim(message)
+
+    assert claim.parsed_by == "deterministic"
+    assert claim.model_version == "deterministic"
+
+
+def test_model_version_is_carried_through_to_claim_verification(store, monkeypatch):
+    """The field must survive all the way to VerificationReport's output —
+    that's what makes it usable by item 7 without re-deriving it."""
+    monkeypatch.setattr(config, "TRACE_LLM_ENABLED", False)
+    _elicit_sup21_dispatched_reply(store)
+
+    coverage = compute_coverage(store, now=NOW)
+    monitor = run_monitor_cycle(store, coverage=coverage, now=NOW)
+    report = run_verification_cycle(store, coverage=coverage, monitor=monitor, now=NOW)
+
+    verification = report.for_po("PO-7712")
+    assert verification.claim.model_version == "deterministic"
 
 
 # ==========================================================================

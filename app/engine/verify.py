@@ -199,14 +199,31 @@ class ParsedClaim(BaseModel):
     to. `raw_message` and `parsed_by` exist for audit traceability — so a
     contradiction can be traced back to the actual message and the actual
     parser that read it — not so anything downstream re-reads the text for
-    tone."""
+    tone.
+
+    `model_version` is ARCHITECTURE.md §7's `ProvenanceEdge.model_version`
+    field, in its exact given format (`"gemini-<version> | deterministic"`) —
+    carried here so item 7 reads it off this record instead of re-deriving or
+    hardcoding a model string of its own. It is the one field in this whole
+    module that would catch a SILENT demo-time degradation: if
+    `TRACE_LLM_ENABLED` is true but a specific verification's
+    `model_version` reads `"deterministic"`, the LLM call failed on that
+    message and fell through (see `parse_claim`) — `parsed_by` says the same
+    thing at a coarser grain, `model_version` is the one with the literal
+    string an auditor or judge can match against what the demo was supposed
+    to be running.
+    """
 
     po_id: Optional[str]
     claim_status: ClaimStatus
     claimed_delay_days: int = 0
     parsed_by: Literal["deterministic", "llm"]
+    model_version: str
     raw_message: str
     message_id: str
+
+
+DETERMINISTIC_MODEL_VERSION = "deterministic"
 
 
 def parse_claim(message: SupplierMessage) -> ParsedClaim:
@@ -216,17 +233,27 @@ def parse_claim(message: SupplierMessage) -> ParsedClaim:
     because AGENTS.md rule 2 makes the deterministic path the one this
     pipeline cannot function without, and a parse failure must degrade to it
     silently rather than break claim verification entirely.
+
+    `model_version` on the returned claim is set from `parse_claim`'s own
+    control flow, not guessed after the fact: it is only ever
+    `gemini_client.MODEL_VERSION` on the branch that actually returned
+    successfully from Gemini, and `DETERMINISTIC_MODEL_VERSION` on every
+    other branch — including the fallthrough after a caught exception. A
+    demo running with `TRACE_LLM_ENABLED=true` that silently loses the
+    network mid-run will show `model_version="deterministic"` on the affected
+    verifications; that flip is the signal (see `ParsedClaim`'s docstring).
     """
     if config.TRACE_LLM_ENABLED:
         try:
-            from app.llm.gemini_client import parse_supplier_claim as _llm_parse
+            from app.llm import gemini_client
 
-            parsed = _llm_parse(message.body)
+            parsed = gemini_client.parse_supplier_claim(message.body)
             return ParsedClaim(
                 po_id=parsed.po_id or message.po_id,
                 claim_status=parsed.claim_status,  # type: ignore[arg-type]
                 claimed_delay_days=parsed.claimed_delay_days,
                 parsed_by="llm",
+                model_version=gemini_client.MODEL_VERSION,
                 raw_message=message.body,
                 message_id=message.message_id,
             )
@@ -240,6 +267,7 @@ def parse_claim(message: SupplierMessage) -> ParsedClaim:
         claim_status=_extract_claim_status_deterministic(message.body),
         claimed_delay_days=_extract_delay_days_deterministic(message.body),
         parsed_by="deterministic",
+        model_version=DETERMINISTIC_MODEL_VERSION,
         raw_message=message.body,
         message_id=message.message_id,
     )
