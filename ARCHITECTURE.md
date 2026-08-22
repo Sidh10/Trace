@@ -103,7 +103,7 @@ Everything above the cut-line works end to end before anything below it starts.
 | 2b | Gated polls on **load-bearing** POs — withdrawal alone turns some order critical. Broader than "thin-coverage POs" by design; the thin gate misses PO-7712 at Beat 1 | 35% + 10% | ✅ built |
 | 3 | Claim verification vs tracking; provenance-only reliability update, exponentially weighted `B(t+1) = (1−λ)B(t) + λs(t+1)`; probe only when a decision depends on the claim | 15% | 2h |
 | 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | ✅ built |
-| 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** | 35% | 2h |
+| 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** (not safety stock — that's 5b) | 35% | ✅ built |
 | 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | 30m |
 | 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | 1.5h |
 | 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | 2h |
@@ -225,24 +225,33 @@ without recomputing it. The three types built so far:
 items 8/9 add their own keys under the same dict-with-a-`summary`-when-narrated
 convention.
 
-**Plan** — SOLVER + PLANNER output, consumed by RATCHET and AUDIT
+**Plan** — SOLVER + PLANNER output, consumed by RATCHET and AUDIT.
+`reversibility` moved onto each ACTION, not one plan-level field — see
+OPEN_ITEMS.md, item 5's build flagged this as a shape change item 6 should
+confirm. `cost_of_inaction` is `None` with a `cost_of_inaction_note`
+whenever this repo's spec material gives no basis to compute it (see
+`app/engine/planner.py`'s module docstring) — the `340000` below is what
+this field looks like WHEN a basis exists, not a value item 5 produces.
 ```json
 {
   "plan_id": "PLAN-0001",
   "actions": [
-    {"type": "purchase_split", "supplier_id": "SUP-42", "qty": 600},
-    {"type": "purchase_split", "supplier_id": "SUP-37", "qty": 300},
-    {"type": "safety_stock_draw", "days": 4, "justification": "..."},
-    {"type": "production_reschedule", "production_order_id": "PROD-914", "delay_days": 2}
+    {"type": "purchase_split", "supplier_id": "SUP-42", "qty": 600, "reversibility": "compensable"},
+    {"type": "purchase_split", "supplier_id": "SUP-37", "qty": 300, "reversibility": "compensable"},
+    {"type": "safety_stock_draw", "days": 4, "justification": "...", "reversibility": "?"},
+    {"type": "production_reschedule", "production_order_id": "PROD-914", "delay_days": 2, "reversibility": "reversible"}
   ],
   "rejected_alternatives": [
-    {"option": "SUP-18 only", "saved": 12000, "regret": "disqualified — uncertified"}
+    {"option": "SUP-18 only", "saved": -20751, "regret": "disqualified — uncertified"}
   ],
   "cost_of_inaction": 340000,
-  "total_cost": 171000,
-  "reversibility": "idempotent | reversible | compensable | irreversible"
+  "total_cost": 171000
 }
 ```
+`saved` is signed from the chosen plan's point of view: **positive** means
+the rejected option would have cost MORE (rejecting it saved money);
+**negative** means it would have cost LESS (a real regret, not a saving —
+SUP-18 above was cheaper, so rejecting it, correctly, cost something).
 
 **ProvenanceEdge** — one entry in the audit graph (§4, item 7)
 ```json

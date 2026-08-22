@@ -15,6 +15,69 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       earliest invalidated stage" is the natural place for this, not a change
       to `coverage.py`'s `dependable_inbound()` filter itself.
 
+## Needs a call — cost_of_inaction has no basis in this repo's docs
+
+- [ ] `app/engine/planner.py`'s `Plan.cost_of_inaction` is `None` (with
+      `cost_of_inaction_note` explaining why) because AGENTS.md,
+      ARCHITECTURE.md, PROJECT.md, and BRAND.md — the only spec material in
+      this repo — give no formula: no penalty clause, no shutdown-cost-per-
+      day, no lost-production-value figure. ARCHITECTURE.md §7's `340000` is
+      an illustrative example value in a JSON blob, not a worked
+      calculation. **This is PROJECT.md §4 Beat 4's `IF REJECTED:` punchline
+      and the "Leave-behind" escalation brief's headline number** — if the
+      real problem statement supplies a basis (a penalty clause, a per-day
+      shutdown cost), find it and wire it in before the demo; do not let
+      this ship as `None` on stage. Whoever has the literal problem
+      statement text should resolve this first, before item 6 (RATCHET,
+      which surfaces this in its decision brief) is built.
+
+## Needs a call — Plan shape: reversibility moved per-action
+
+- [ ] ARCHITECTURE.md §7's `Plan` shape previously had ONE `reversibility`
+      field for the whole plan. Item 5 tags reversibility on EACH action
+      instead (`purchase_split` -> `compensable`, `production_reschedule`
+      -> `reversible`) — see `app/engine/planner.py`'s module docstring for
+      why. ARCHITECTURE.md §7 is updated to match. Item 6 (RATCHET) is the
+      consuming component §7 says should agree a shape change; confirm this
+      works for it, or say what needs to change.
+- [ ] `safety_stock_draw` (item 5b, not built here) needs its OWN
+      reversibility tag decided when it's built — `?` in ARCHITECTURE.md
+      §7's example, deliberately not guessed at here.
+
+## Needs a call — selection rule puts reliability ahead of lead time
+
+- [ ] `planner.py`'s `SELECTION_RULE` ranks reliability_score above
+      lead_time_days (see the module docstring's full reasoning: coverage's
+      own "gap is the exposure to supplier claims" framing, and BRAND.md's
+      pitch that a claim gets checked "before it's trusted" — trusted enough
+      to change what gets picked, not just logged). Concretely, against the
+      real current dataset (item 4's post-verify Pareto set for COMP-104),
+      this picks the SUP-37+SUP-42 split over SUP-21 alone, even though
+      SUP-21 is 3 days faster and ~₹13,500 cheaper — because item 3 already
+      downgraded SUP-21 to 0.45 reliability after the PO-7712 contradiction.
+      **This is a genuine design call, not a spec-given rule.** A real risk
+      of ANY strict lexicographic tier: a trivial reliability difference
+      (0.81 vs 0.80) would outrank a huge lead-time gap (6 days vs 60) just
+      as decisively as the real 0.81-vs-0.45 gap did. A more nuanced version
+      — gating on the DISCRETE fact "was this specific claim contradicted"
+      (from `ClaimVerification.contradicted`) rather than the continuous
+      `reliability_score` — would avoid that, but needs `planner.py` to
+      consume a `VerificationReport` too, a real interface change not made
+      here. Flagging for whoever revisits this, not fixed unilaterally.
+- [ ] **Smoke-tested against the real current state, and it does NOT match
+      PROJECT.md §4 Beat 4's promised "delay PROD-914 by two days."** Against
+      the actual post-verify Pareto set, the chosen split (SUP-37+SUP-42)
+      allocates the faster-arriving SUP-42 portion to PROD-882 (high
+      priority) and the remainder to PROD-914 — BOTH orders land before
+      their own deadlines under this allocation, so `_reschedule_actions`
+      produces nothing. This was checked, not forced: see
+      `tests/test_planner.py::test_smoke_against_the_real_current_state` for
+      the full real numbers. If the demo needs "delay PROD-914 by two days"
+      specifically, that requires either different seed numbers (already
+      owed to person A) or a different selection rule than the one above —
+      not a change to `allocate_stock`'s allocation logic, which is correct
+      given whatever it's handed.
+
 ## Needs a call — "certified" interpretation
 
 - [ ] `app/engine/solver.py`'s hard filter reads "certified" as "holds at
