@@ -290,7 +290,11 @@ def _min_commitment_cost(supplier: SupplierRecord) -> float:
 
 
 def hard_filter(
-    store: Store, component_id: str, *, po_id: Optional[str] = None
+    store: Store,
+    component_id: str,
+    *,
+    po_id: Optional[str] = None,
+    skip_quality_filter: bool = False,
 ) -> tuple[list[SupplierRecord], list[Rejection]]:
     """Drop uncertified, quality-below-threshold, or budget-infeasible
     suppliers using `GET /suppliers` and `GET /inventory/{component_id}`
@@ -340,7 +344,7 @@ def hard_filter(
             )
             continue
 
-        if not _meets_quality_requirement(supplier, requirement_component):
+        if not skip_quality_filter and not _meets_quality_requirement(supplier, requirement_component):
             rejections.append(
                 Rejection(
                     subject=supplier.supplier_id,
@@ -697,6 +701,8 @@ def run_solver(
     po_id: Optional[str] = None,
     existing_quotes: Optional[dict[str, RFQQuote]] = None,
     now: Optional[datetime] = None,
+    min_price_only: bool = False,
+    skip_quality_filter: bool = False,
 ) -> SolverResult:
     """HARD FILTER, then RFQ + expiry, then brute-force combination
     enumeration, then Pareto non-domination. One call, the full item-4 pass.
@@ -710,7 +716,9 @@ def run_solver(
     store = STATE if store is None else store
     now = clock.now() if now is None else now
 
-    survivors, hard_filter_rejections = hard_filter(store, component_id, po_id=po_id)
+    survivors, hard_filter_rejections = hard_filter(
+        store, component_id, po_id=po_id, skip_quality_filter=skip_quality_filter
+    )
 
     quotes, expiry_rejections, requested, reused = fetch_valid_quotes(
         store, survivors, quantity_needed, existing_quotes=existing_quotes, now=now
@@ -725,7 +733,25 @@ def run_solver(
             quoted_survivors, quotes, quantity_needed
         )
 
-    front, dominated_rejections = pareto_front(combinations)
+    if min_price_only and combinations:
+        cheapest_combo = min(combinations, key=lambda c: c.total_price)
+        front = [cheapest_combo]
+        dominated_rejections = [
+            Rejection(
+                subject=c.label,
+                reason="dominated",
+                note=f"{c.label} is rejected under min_price_only selection.",
+                estimated_total_price=c.total_price,
+                lead_time_days=c.lead_time_days,
+                reliability_score=c.reliability_score,
+                quality_score=c.quality_score,
+                combination=c,
+            )
+            for c in combinations
+            if c.label != cheapest_combo.label
+        ]
+    else:
+        front, dominated_rejections = pareto_front(combinations)
 
     rejected = hard_filter_rejections + expiry_rejections + dominated_rejections
 

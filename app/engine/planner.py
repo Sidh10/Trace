@@ -934,6 +934,7 @@ def run_planner(
     coverage_results: list[CoverageResult],
     *,
     now: Optional[datetime] = None,
+    allow_reschedule: bool = True,
 ) -> Optional[Plan]:
     """HARD FILTER and SOLVER (item 4) already ran; this is PLAN (item 5).
 
@@ -1015,7 +1016,7 @@ def run_planner(
     else:
         allocations = baseline_allocations
 
-    reschedules = _reschedule_actions(allocations)
+    reschedules = _reschedule_actions(allocations) if allow_reschedule else []
 
     purchase_actions: list[PurchaseSplitAction] = [
         PurchaseSplitAction(

@@ -259,9 +259,17 @@ _PRODUCTS = [
 
 def _make_inventory(rng: random.Random, component_id: str, name: str) -> InventoryRecord:
     daily_usage = rng.choice([20, 30, 40, 55, 60, 75, 90, 110])
-    safety_stock = daily_usage * rng.choice([1, 2, 3])
-    usable = safety_stock + rng.randint(0, daily_usage * 6)
-    current = usable + rng.randint(0, 40)  # ERP can overstate; small day-to-day gap by default
+    safety_stock_mult = rng.choice([1, 2, 3])
+    extra_days = rng.randint(22, 28)
+    overstate_gap = rng.randint(0, 40)
+    if component_id == "COMP-122":
+        daily_usage = 40
+        safety_stock = 0
+        usable = 420
+    else:
+        safety_stock = daily_usage * safety_stock_mult
+        usable = safety_stock + daily_usage * extra_days
+    current = usable + overstate_gap
     return InventoryRecord(
         component_id=component_id,
         name=name,
