@@ -2,10 +2,10 @@
 field or invent a data model here (AGENTS.md rule 8, ARCHITECTURE.md §6).
 
 Each record model's docstring cites the problem-statement section its field
-set was copied from. Two additions beyond the spec's example JSON are
-flagged inline where they occur — both are additive (new fields / new
-records of an already-specified shape), never a rename or a reinterpretation
-of a given field.
+set was copied from. Additions beyond the spec's example JSON are flagged
+inline where they occur — all are additive (new fields / new records of an
+already-specified shape), never a rename or a reinterpretation of a given
+field.
 """
 
 from __future__ import annotations
@@ -21,7 +21,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class InventoryRecord(BaseModel):
-    """Verbatim shape, problem statement §5.1."""
+    """Verbatim shape, problem statement §5.1, plus two additive fields.
+
+    ADDITION: `required_certifications` / `required_quality_score`. The
+    problem statement states certification requirements are PER-COMPONENT
+    ("Some components require certified suppliers" — not all), but §5.1's
+    own inventory fields have nowhere to carry that. Added here because
+    `InventoryRecord` is already the one row-per-component_id record every
+    other module keys off (`Store.inventory: dict[str, InventoryRecord]`) —
+    reusing that existing per-component keying rather than introducing a
+    second, parallel per-component store. Default to no requirement (empty
+    list, 0.0) so every component this session did not explicitly seed a
+    requirement for is unaffected; only COMP-104 carries a real one
+    (`seed_data.py`), matching Scenario 4's model answer: SUP-18 is rejected
+    on `quality_score`, not on certifications.
+    """
 
     component_id: str
     name: str
@@ -31,6 +45,8 @@ class InventoryRecord(BaseModel):
     safety_stock: int
     warehouse: str
     last_updated: datetime
+    required_certifications: list[str] = Field(default_factory=list)
+    required_quality_score: float = 0.0
 
 
 # --------------------------------------------------------------------------

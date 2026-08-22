@@ -1,23 +1,35 @@
-"""Gemini client — ARCHITECTURE.md §9, item 3's LLM half.
+"""Gemini client — ARCHITECTURE.md §9, item 3 AND item 6's LLM half.
 
-Thin wrapper, one call shape. AGENTS.md rule 1: the LLM's only job anywhere in
-this repo is (a) parsing unstructured text into structured fields, or (b)
-turning a finished deterministic decision into plain language. This module
-implements (a), for exactly the claim shape `app/engine/verify.py` needs —
-the same `report_supplier_claim` function-calling tool
-`scripts/task_zero_gemini_check.py` already proved works end to end (ran
-2026-08-22, exit 0 — see OPEN_ITEMS.md). Nothing here compares a claim to
-tracking, scores a supplier, or makes any decision; `verify.py` owns every
-comparison, on the deterministic side of AGENTS.md rule 1's line.
+Thin wrapper, two call shapes — AGENTS.md rule 1's own two jobs, both now
+implemented here:
+  (a) parsing unstructured text into structured fields —
+      `parse_supplier_claim`, for `app/engine/verify.py` (item 3). The same
+      `report_supplier_claim` function-calling tool
+      `scripts/task_zero_gemini_check.py` already proved works end to end
+      (ran 2026-08-22, exit 0 — see OPEN_ITEMS.md).
+  (b) turning a finished deterministic decision into plain language —
+      `narrate_decision`, for `app/engine/ratchet.py` (item 6). Takes the
+      ALREADY-COMPLETE deterministic brief text as input and asks for a
+      polished rephrasing — nothing about what facts to include, what
+      decision was made, or what any number is comes from this call; the
+      caller decides all of that before this function is ever invoked.
+
+Nothing here compares a claim to tracking, checks a threshold, or decides
+execute-vs-escalate — `verify.py` and `ratchet.py` own every comparison and
+every decision, on the deterministic side of AGENTS.md rule 1's line. This
+module's two functions only ever move information ACROSS that line in the
+two directions rule 1 permits: text-in-structure-out, or
+structure-in-text-out. Never structure-in-decision-out.
 
 Only ever called when `config.TRACE_LLM_ENABLED` is True, and only from
-`verify.py`'s LLM branch. AGENTS.md rule 2 requires the pipeline to run end to
-end without this module doing anything for real — the deterministic
-regex/keyword parser in `verify.py` is the required path; this is bolted on
-top of it, never underneath it. Consistent with that, every failure mode here
-raises rather than substitutes a guessed answer: a silently wrong parse would
-be a worse failure than a loud one, and `verify.py`'s caller decides whether
-to fall back to the deterministic parser, not this module.
+`verify.py`'s / `ratchet.py`'s own LLM branches. AGENTS.md rule 2 requires
+the pipeline to run end to end without this module doing anything for real —
+the deterministic regex/keyword parser in `verify.py` and the deterministic
+template in `ratchet.py` are the required paths; this is bolted on top of
+them, never underneath. Consistent with that, every failure mode here raises
+rather than substitutes a guessed answer: a silently wrong parse or
+narration would be a worse failure than a loud one, and the caller decides
+whether to fall back to the deterministic path, not this module.
 """
 
 from __future__ import annotations
@@ -141,3 +153,38 @@ def parse_supplier_claim(message_body: str) -> LLMParsedClaim:
         claim_status=claim_status,
         claimed_delay_days=int(args.get("claimed_delay_days") or 0),
     )
+
+
+def narrate_decision(deterministic_brief_text: str) -> str:
+    """One Gemini call, job (b): rephrase an ALREADY-COMPLETE, already-
+    correct deterministic decision brief into more natural prose. The
+    caller (`ratchet.py`) computes every number, every trigger, and the
+    execute-vs-escalate decision itself BEFORE this is ever called — this
+    function receives the finished brief as its ONLY input and returns
+    text; nothing it returns is parsed back into any decision (AGENTS.md
+    rule 3: the LLM cannot argue past a hard trigger, structurally, because
+    nothing here is ever read as anything other than a display string).
+
+    Raises on any failure — missing API key, SDK import failure, network
+    error, empty response — never substitutes a guessed rephrasing.
+    """
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is unset — cannot call Gemini.")
+
+    from google import genai
+
+    client = genai.Client(api_key=config.GEMINI_API_KEY)
+
+    prompt = (
+        "Rephrase the following supply-chain decision brief into clear, "
+        "plain-language prose for an operations manager. Do not add, "
+        "remove, or change any number, decision, or fact — only improve "
+        "readability and flow.\n\n" + deterministic_brief_text
+    )
+
+    response = client.models.generate_content(model=MODEL_VERSION, contents=prompt)
+
+    text = getattr(response, "text", None)
+    if not text or not text.strip():
+        raise RuntimeError("Gemini returned no narration text.")
+    return text.strip()

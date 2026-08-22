@@ -7,8 +7,10 @@ JSON for them (§5.1–§5.4, §8, §17). SUP-21, SUP-37, SUP-18 and PROD-914 ar
 *named* in the spec's narrative (§8 Scenario 3, §17's worked example) but
 never given as JSON — those four records are filled in here using the exact
 schemas from schemas.py, with values chosen to match what the narrative
-requires of them (SUP-18 fails the quality/cert bar per Scenario 4; SUP-21
-is PO-7712's supplier; PROD-914 is the low-priority order delayed in §17).
+requires of them (SUP-18 fails COMP-104's required_quality_score per
+Scenario 4's model answer — certified, but quality-rejected, see its own
+record below for why; SUP-21 is PO-7712's supplier; PROD-914 is the
+low-priority order delayed in §17).
 
 Everything beyond those anchors is generated, deterministically (seeded
 RNG), to reach the suggested dataset size in problem statement §16:
@@ -58,6 +60,16 @@ _ANCHOR_INVENTORY = InventoryRecord(
     safety_stock=150,
     warehouse="Pune-Plant-1",
     last_updated=datetime(2026, 9, 1, 10, 0, 0, tzinfo=timezone.utc),
+    # ADDITIVE (schemas.py) — the problem statement's own model answer for
+    # Scenario 4 rejects SUP-18 on quality_score (0.71), not on
+    # certifications. ISO-9001 is required because SUP-21/42/37 already all
+    # hold it (a real, pre-existing requirement, not invented); 0.85 sits
+    # strictly between SUP-18 (0.71, fails) and SUP-37 (0.89, the next
+    # lowest, passes) so the quality check is the sole, unambiguous
+    # discriminator — see SUP-18's own record below for why its
+    # certifications were also updated to make this true.
+    required_certifications=["ISO-9001"],
+    required_quality_score=0.85,
 )
 
 _ANCHOR_PO = PurchaseOrder(
@@ -114,7 +126,14 @@ _ANCHOR_SUPPLIERS = [
         certifications=["ISO-9001"],
     ),
     # SUP-18 — narrative-implied, §8 Scenario 4 / §17: cheapest and fastest,
-    # rejected for failing certification.
+    # rejected on QUALITY SCORE — the problem statement's own model answer,
+    # not a certification failure (that earlier reading was wrong; see
+    # solver.py's module docstring and OPEN_ITEMS.md). Holds ISO-9001 (the
+    # same certification COMP-104 requires and every other COMP-104 supplier
+    # already carries) specifically so the certification hard-filter check
+    # PASSES for SUP-18 and the quality-score check is demonstrably the sole
+    # reason it's dropped — proving the two checks are independent, not that
+    # one accidentally masks the other.
     SupplierRecord(
         supplier_id="SUP-18",
         supplier_name="Konkan Fast Components",
@@ -122,10 +141,10 @@ _ANCHOR_SUPPLIERS = [
         unit_price=108,
         lead_time_days=3,
         available_quantity=900,
-        quality_score=0.71,
+        quality_score=0.71,  # below COMP-104's required_quality_score (0.85)
         reliability_score=0.68,
         min_order_quantity=250,
-        certifications=[],  # fails the certified-supplier requirement, §6
+        certifications=["ISO-9001"],
     ),
 ]
 

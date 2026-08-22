@@ -2,6 +2,21 @@
 
 Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.md.
 
+## Owed by whoever builds the orchestrator (app/api/routes.py, not yet built)
+
+- [ ] **`ratchet.py` (item 6) never calls `POST /erp/update`, on either the
+      execute or the escalate path.** ARCHITECTURE.md §3's diagram draws
+      RATCHET and "ERP WRITE — the one irreversible action" as two separate
+      stages; this module decides and narrates only. `record_escalation` is
+      one of the six §5.9 ERP actions and would be a reasonable thing for an
+      orchestration layer to call after an `"escalate"` decision (and
+      `create_alternate_po` / `mark_po_delayed` / `store_plan` after an
+      `"execute"` one) — but that layer doesn't exist yet, and `ratchet.py`
+      does not reach for it unilaterally. Confirmed by
+      `tests/test_ratchet.py::test_ratchet_never_calls_erp_update_on_execute`
+      / `..._on_escalate`. Whoever builds the orchestrator needs to decide
+      which ERP action(s) follow each `DecisionBrief.decision` value.
+
 ## Owed by whoever builds item 8
 
 - [ ] **A possible staleness trigger, not yet wired.** When VERIFY
@@ -15,78 +30,40 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       earliest invalidated stage" is the natural place for this, not a change
       to `coverage.py`'s `dependable_inbound()` filter itself.
 
-## REQUIRED for item 6 — nothing currently catches a plan that misses its deadline
+## RESOLVED — deadline-miss gap, fixed by item 5's correction [3] + item 6
 
-- [ ] **Confirmed gap, not a hypothesis.**
-      `tests/test_planner.py::test_ADVERSARIAL_reliability_first_choice_can_silently_blow_a_deadline_reschedule_would_have_avoided`
-      constructs a real Pareto set — SUP-RELIABLE (0.95 reliability, 20-day
-      lead) vs SUP-RISKY (0.5 reliability, 2-day lead) — against a
-      HIGH-priority order with a 5-day deadline. `SELECTION_RULE` (reliability
-      first, as designed and already flagged above) picks SUP-RELIABLE.
-      `allocate_stock` / `_reschedule_actions` compute the consequence
-      correctly and honestly: `delay_days=15` — the order lands 3x past its
-      original 5-day deadline. **`run_planner` returns this as a normal,
-      well-formed `Plan`, indistinguishable in shape from any other plan.**
-      Nothing anywhere — not `Plan`, not `planner.py`, not any other built
-      component — flags that this specific reschedule might be unacceptable,
-      or that a REJECTED alternative (SUP-RISKY) would have hit the deadline
-      cleanly. `RejectedAlternative.regret` for SUP-RISKY says only "lost on
-      reliability_score" — it never mentions that picking it would have made
-      the deadline the chosen option missed.
-- [ ] **This is AGENTS.md rule 3, already named, not yet implemented
-      anywhere:** *"Cost above threshold, no supplier meets deadline, or
-      quality risk → escalate."* "No supplier meets deadline" is one of
-      exactly three hard, spec-mandated escalation triggers — item 6
-      (RATCHET) is where this belongs (item 5/PLANNER's job is to build the
-      best plan it can from what SOLVER hands it, not to judge whether that
-      plan is good enough to execute autonomously — that judgment is
-      RATCHET's entire reason to exist). **Explicit requirement for item 6:**
-      before executing (or instead of silently executing) ANY plan
-      containing a `production_reschedule` action, check whether
-      `delay_days` represents a deadline miss serious enough to escalate
-      rather than execute silently — at minimum, whenever the CHOSEN
-      combination missed a deadline that a REJECTED, otherwise-valid
-      alternative would have met. This is not optional polish; without it,
-      a plan can silently reschedule a high-priority order by weeks and ship
-      it as if it were routine.
-- [ ] Not fixed in `planner.py` deliberately — item 5's job is to build the
-      best plan from what SOLVER hands it and report the real consequence
-      (which it now does, correctly); judging whether that consequence is
-      acceptable to execute without a human is item 6's job specifically.
-      Fixing it here would mean PLANNER quietly deciding execute-vs-escalate,
-      which ARCHITECTURE.md §3's own diagram and this session's item 5
-      instructions both reserve for RATCHET alone.
+The gap this section used to describe (`SELECTION_RULE` could pick a
+reliability-favored plan that silently misses a high-priority deadline,
+with nothing downstream catching it) is fixed two ways, authoritative
+correction supplied 2026-08-23:
+- `planner.py`'s selection now runs deadline feasibility as a HARD FILTER
+  before ranking (`_partition_by_deadline_feasibility` /
+  `_is_deadline_feasible`) — a combination missing a high-priority
+  deadline is dropped (`RejectedAlternative.reason="deadline_infeasible"`)
+  BEFORE `SELECTION_RULE`'s reliability/lead-time/price tiers ever compare
+  it against anything. `Plan.deadline_feasible=False` when even the best
+  available option still misses, so a plan is always returned (never
+  silently `None`) with an explicit flag.
+- `ratchet.py` (item 6) reads that flag directly as its
+  `no_feasible_deadline_plan` hard trigger and escalates — AGENTS.md
+  rule 3's "no supplier meets deadline" is now actually implemented.
+- The adversarial test that exposed this
+  (`tests/test_planner.py::test_ADVERSARIAL_higher_reliability_combination_missing_the_deadline_is_now_filtered_not_chosen`)
+  now asserts the FIXED behavior: SUP-RISKY (meets the deadline) is chosen
+  over SUP-RELIABLE (misses it by 15 days), even though SUP-RELIABLE would
+  win `SELECTION_RULE`'s own tiers outright.
 
-## BLOCKING for the demo — cost_of_inaction, searched twice, genuinely absent
+## RESOLVED — cost_of_inaction, corrected shape (was BLOCKING)
 
-- [ ] `app/engine/planner.py`'s `Plan.cost_of_inaction` is `None`. Searched
-      TWICE (re-checked specifically for SLA terms, contract clauses,
-      damages, late fees — anything consequence-framed rather than
-      process-framed) — AGENTS.md, ARCHITECTURE.md, PROJECT.md, BRAND.md
-      give no formula. ARCHITECTURE.md §5 explicitly forbids "customer SLA
-      tiers" as out-of-domain, which is further evidence, not just absence.
-      Also tried the ONE concrete fallback proxy floated during this build
-      ("units short × their committed sale price") and confirmed it has NO
-      data to compute from: every monetary field in `schemas.py`
-      (`PurchaseOrder`/`SupplierRecord`/`RFQQuote.unit_price`,
-      `ApprovalCheckRequest.estimated_cost`) is a PROCUREMENT cost;
-      `ProductionOrder` carries no price field at all. Two further fallbacks
-      built only from data that DOES exist were considered and rejected:
-      pricing the shortfall at a real quote is circular with `total_cost`
-      (same purchase, relabeled, not independent information); pricing
-      downtime by day requires inventing a time horizon for "how long does
-      inaction last," which is the same rule-7 violation one step removed.
-      Full reasoning in `app/engine/planner.py`'s module docstring and
-      `COST_OF_INACTION_NOTE` (the actual runtime-visible note, not just a
-      code comment).
-      **This is PROJECT.md §4 Beat 4's `IF REJECTED:` punchline and the
-      "Leave-behind" escalation brief's headline number — it cannot ship as
-      `None` on stage.** Whoever has the literal problem statement text
-      needs to find a real basis (penalty clause, per-day shutdown cost,
-      lost-revenue figure) and wire it into `planner.py` before the demo, or
-      the team needs to decide how Beat 4 and the leave-behind brief handle
-      an admittedly-unknown cost of inaction on stage. Resolve before item 6
-      (RATCHET) surfaces this in its decision brief.
+The earlier "keep searching for a money figure" framing was itself the
+mistake — authoritative correction (2026-08-23): the real problem statement
+has no penalty clause, shutdown cost, or lost-revenue figure either.
+`Plan.cost_of_inaction` is now `CostOfInaction`, a structured, non-monetary
+object (`production_orders_at_risk`, `cost_increase_vs_baseline_pct` — the
+spec's own §17 metric, `baseline_total_cost`), never bare `None` at the
+`Plan` level. Full derivation in `app/engine/planner.py`'s module docstring.
+`ratchet.py` (item 6) surfaces it in the decision brief by reading
+`plan.cost_of_inaction` directly, never recomputing.
 
 ## Needs a call — Plan shape: reversibility moved per-action
 
@@ -127,7 +104,7 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       allocation. Recorded here in case a similar mistake gets reintroduced
       by a future change to `allocate_stock` or `_safety_stock_decision`.
 
-## Needs a call — selection rule puts reliability ahead of lead time
+## Needs a call — selection rule puts reliability ahead of lead time (PARTIALLY resolved)
 
 - [ ] `planner.py`'s `SELECTION_RULE` ranks reliability_score above
       lead_time_days (see the module docstring's full reasoning: coverage's
@@ -138,15 +115,24 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       this picks the SUP-37+SUP-42 split over SUP-21 alone, even though
       SUP-21 is 3 days faster and ~₹13,500 cheaper — because item 3 already
       downgraded SUP-21 to 0.45 reliability after the PO-7712 contradiction.
-      **This is a genuine design call, not a spec-given rule.** A real risk
-      of ANY strict lexicographic tier: a trivial reliability difference
-      (0.81 vs 0.80) would outrank a huge lead-time gap (6 days vs 60) just
-      as decisively as the real 0.81-vs-0.45 gap did. A more nuanced version
-      — gating on the DISCRETE fact "was this specific claim contradicted"
-      (from `ClaimVerification.contradicted`) rather than the continuous
-      `reliability_score` — would avoid that, but needs `planner.py` to
-      consume a `VerificationReport` too, a real interface change not made
-      here. Flagging for whoever revisits this, not fixed unilaterally.
+      **This is a genuine design call, not a spec-given rule.**
+      **PARTIALLY RESOLVED by item 5's correction [3]:** the worst
+      CONSEQUENCE of this risk — a reliability-favored plan silently missing
+      a high-priority deadline — can no longer happen, because deadline
+      feasibility is now a hard filter applied BEFORE this ranking runs (see
+      the "RESOLVED — deadline-miss gap" entry above). What remains open:
+      AMONG feasible candidates (all meeting every high-priority deadline),
+      a trivial reliability difference (0.81 vs 0.80) still outranks a huge
+      lead-time difference (6 days vs 60) just as decisively as the real
+      0.81-vs-0.45 gap did — that part of the tier's behavior is unchanged
+      and still a live design question, just no longer able to cause a
+      deadline miss. A more nuanced version — gating on the DISCRETE fact
+      "was this specific claim contradicted" (from
+      `ClaimVerification.contradicted`) rather than the continuous
+      `reliability_score` — would still be worth considering, but needs
+      `planner.py` to consume a `VerificationReport` too, a real interface
+      change not made here. Flagging for whoever revisits this, not fixed
+      unilaterally.
 - [ ] **Smoke-tested against the real current state, and it does NOT match
       PROJECT.md §4 Beat 4's promised "delay PROD-914 by two days."** Against
       the actual post-verify Pareto set, the chosen split (SUP-37+SUP-42)
@@ -161,19 +147,23 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       not a change to `allocate_stock`'s allocation logic, which is correct
       given whatever it's handed.
 
-## Needs a call — "certified" interpretation
+## RESOLVED — "certified" interpretation, corrected against the real spec
 
-- [ ] `app/engine/solver.py`'s hard filter reads "certified" as "holds at
-      least one certification" (any cert, not specifically ISO-9001).
-      Grounded in `seed_data.py`'s own SUP-18 comment ("fails the
-      certified-supplier requirement, §6") and ARCHITECTURE.md §7's worked
-      example ("disqualified — uncertified") — both describe the failure as
-      lacking certification entirely, not lacking one specific credential.
-      This session doesn't have the literal problem-statement text to check
-      further. If §6 actually names a specific required certification
-      (ISO-9001, say), `_is_certified` in `solver.py` is a one-line fix, not
-      a design change — flagging so whoever DOES have that text can confirm
-      or correct it before the demo.
+- Previous session's "certified = holds at least one certification" reading
+  was WRONG, per the actual problem statement (authoritative, supplied
+  2026-08-23): certification requirements are PER-COMPONENT ("some
+  components require certified suppliers," not all), and Scenario 4's model
+  answer rejects SUP-18 on `quality_score`, not certifications.
+  `app/engine/solver.py`'s hard filter now runs two independent checks —
+  `_meets_certification_requirement` (component's own
+  `required_certifications`, trivially satisfied when empty) and
+  `_meets_quality_requirement` (component's own `required_quality_score`) —
+  both reading additive fields on `InventoryRecord` (schemas.py). COMP-104
+  seeds `required_certifications=["ISO-9001"]`,
+  `required_quality_score=0.85`; SUP-18 now holds ISO-9001 (updated from
+  `[]`) specifically so certification passes and quality (0.71 < 0.85) is
+  the sole, demonstrated reason it's dropped. `DropReason` gained
+  `quality_below_threshold` as its own value, distinct from `uncertified`.
 
 ## Owed by whoever builds item 5 (reads item 4's output)
 

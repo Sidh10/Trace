@@ -105,7 +105,7 @@ Everything above the cut-line works end to end before anything below it starts.
 | 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | ✅ built |
 | 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** (not safety stock — that's 5b) | 35% | ✅ built |
 | 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | ✅ built |
-| 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | 1.5h |
+| 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | ✅ built |
 | 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | 2h |
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
 | 8 | Staleness detector + earliest-conflict re-entry + post-replan verification | 10% | 2h |
@@ -226,26 +226,38 @@ items 8/9 add their own keys under the same dict-with-a-`summary`-when-narrated
 convention.
 
 **Plan** — SOLVER + PLANNER output, consumed by RATCHET and AUDIT.
-`reversibility` moved onto each ACTION, not one plan-level field — see
-OPEN_ITEMS.md, item 5's build flagged this as a shape change item 6 should
-confirm. `cost_of_inaction` is `None` with a `cost_of_inaction_note`
-whenever this repo's spec material gives no basis to compute it (see
-`app/engine/planner.py`'s module docstring) — the `340000` below is what
-this field looks like WHEN a basis exists, not a value item 5 produces.
+`reversibility` sits on each ACTION, not one plan-level field (item 5's own
+shape change; `safety_stock_draw` resolved to `compensable`, item 5b's build
+filled in the `?`). `deadline_feasible` is item 5's own deadline hard-filter
+result — `false` means every Pareto candidate missed a high-priority
+deadline and this is the best available fallback, RATCHET's exact
+"no feasible plan meets a high-priority deadline" signal. `cost_of_inaction`
+is a **structured, non-monetary object** — CORRECTED from an earlier
+`None`-or-a-rupee-figure design: the real problem statement has no penalty
+clause or shutdown cost to compute a money figure from (see
+`app/engine/planner.py`'s module docstring for the full search), so this
+field never claims a dollar amount that doesn't exist. `cost_increase_vs_
+baseline_pct` IS the spec's own metric (§17).
 ```json
 {
   "plan_id": "PLAN-0001",
   "actions": [
     {"type": "purchase_split", "supplier_id": "SUP-42", "qty": 600, "reversibility": "compensable"},
     {"type": "purchase_split", "supplier_id": "SUP-37", "qty": 300, "reversibility": "compensable"},
-    {"type": "safety_stock_draw", "days": 4, "justification": "...", "reversibility": "?"},
+    {"type": "safety_stock_draw", "days": 4, "justification": "...", "reversibility": "compensable"},
     {"type": "production_reschedule", "production_order_id": "PROD-914", "delay_days": 2, "reversibility": "reversible"}
   ],
   "rejected_alternatives": [
-    {"option": "SUP-18 only", "saved": -20751, "regret": "disqualified — uncertified"}
+    {"option": "SUP-18 only", "saved": -20751, "regret": "quality_score below COMP-104's required threshold", "reason": "quality_below_threshold"}
   ],
-  "cost_of_inaction": 340000,
-  "total_cost": 171000
+  "deadline_feasible": true,
+  "cost_of_inaction": {
+    "production_orders_at_risk": [],
+    "cost_increase_vs_baseline_pct": 10.32,
+    "baseline_total_cost": 112100.0,
+    "baseline_note": "Baseline = the delayed PO's own contracted unit_price x quantity_allocated..."
+  },
+  "total_cost": 123674.0
 }
 ```
 `saved` is signed from the chosen plan's point of view: **positive** means
@@ -354,7 +366,7 @@ trace/
 |---|---|
 | Supplier delays after confirming | 3 — claim verification + reliability memory |
 | Claims dispatch, tracking contradicts | 3 — provenance-based downgrade |
-| Cheapest supplier fails quality | 4 — certification hard filter before RFQ |
+| Cheapest supplier fails quality | 4 — per-component quality-threshold hard filter before RFQ |
 | High-reliability supplier lacks quantity | 5 — order splitting |
 | Low-reliability supplier is fastest | 4 — Pareto surfaces the tradeoff |
 | Purchase exceeds approval limit | 6 — hard ratchet + decision brief |

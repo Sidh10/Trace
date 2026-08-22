@@ -11,10 +11,12 @@ one (PLANNER, item 5).
 --------------------------------------------------------------------------
 Two stages, in the order ARCHITECTURE.md §3's diagram gives them
 --------------------------------------------------------------------------
-1. HARD FILTER — drop uncertified or budget-infeasible suppliers using data
-   already on `GET /suppliers` (§5.3), BEFORE spending an RFQ call on them.
-   Both checks are spec-field comparisons, not judgment calls (see
-   `_is_certified` / `_is_budget_feasible` for exactly which fields and why).
+1. HARD FILTER — drop uncertified, quality-below-threshold, or
+   budget-infeasible suppliers using data already on `GET /suppliers` (§5.3)
+   and `GET /inventory/{component_id}` (§5.1), BEFORE spending an RFQ call on
+   them. Every check is a spec-field comparison, not a judgment call (see
+   `_meets_certification_requirement` / `_meets_quality_requirement` /
+   `_min_commitment_cost` for exactly which fields and why).
 2. SOLVER proper — request a live quote (§5.7) for each survivor, drop any
    quote past `quote_valid_hours`, brute-force enumerate feasible ways to
    source `quantity_needed` from the survivors (single-supplier fills and
@@ -42,17 +44,35 @@ downgrades it after the PO-7712 contradiction, also the least reliable one —
 Pareto must still surface it, not silently drop it or average it away.
 
 --------------------------------------------------------------------------
-Two named hard-filter rules, and what each is actually grounded in
+Three named hard-filter rules, and what each is actually grounded in
 --------------------------------------------------------------------------
-**Certified** — a supplier passes if `certifications` is non-empty.
-`seed_data.py`'s own comment on SUP-18 (`certifications=[]  # fails the
-certified-supplier requirement, §6`) and ARCHITECTURE.md §7's worked
-rejected-alternative (`"regret": "disqualified — uncertified"`) both describe
-the failure as *lacking certification entirely*, not lacking one specific
-credential — so "certified" is read here as "holds at least one
-certification," not "holds ISO-9001 specifically." This repo does not have
-the literal problem-statement text to check further; if that reading is
-wrong, the fix is a one-line change to `_is_certified`, not a design change.
+**CORRECTED, authoritative from the problem statement (previous session did
+not have the literal text and read this wrong):** certification is
+PER-COMPONENT ("Some components require certified suppliers" — not all),
+and the model answer for Scenario 4 rejects SUP-18 on `quality_score`, not
+on certifications. The earlier "certified = holds at least one
+certification" reading both over-rejected (any component with no real cert
+requirement would still demand SOME certification) and under-rejected
+(a supplier holding an irrelevant certification would pass regardless of
+what the component actually needs). Two independent checks now stand where
+one used to:
+
+**Certified** — a supplier passes if it holds every certification
+`InventoryRecord.required_certifications` lists for that component (§5.1,
+additive field — see schemas.py). A component requiring none passes this
+check trivially for every supplier, matching "some components require
+certified suppliers," not all. `seed_data.py` seeds COMP-104 with
+`["ISO-9001"]`; SUP-21/42/37/18 all hold it (SUP-18 was updated to hold it
+too — see its own record), so NONE of COMP-104's suppliers is rejected on
+this check, and the rejected-alternative wording in ARCHITECTURE.md §7
+("disqualified — uncertified") describes what the CHECK would say if a
+supplier failed it, not a claim that SUP-18 specifically does.
+
+**Quality** — a supplier passes if `quality_score >=
+InventoryRecord.required_quality_score` for that component. COMP-104's
+threshold (0.85) sits strictly between SUP-18 (0.71, fails) and every other
+COMP-104 supplier (0.89–0.94, passes) — this is the check Scenario 4's model
+answer actually exercises.
 
 **Budget-infeasible** — a supplier's *minimum viable commitment*
 (`unit_price × min_order_quantity`, the smallest purchase actually possible
@@ -106,13 +126,16 @@ from pydantic import BaseModel
 from app.environment.clock import clock
 from app.environment.schemas import (
     ApprovalCheckRequest,
+    InventoryRecord,
     RFQQuote,
     RFQRequest,
     SupplierRecord,
 )
 from app.environment.seed_data import STATE, Store
 
-DropReason = Literal["uncertified", "budget_infeasible", "expired_quote", "dominated"]
+DropReason = Literal[
+    "uncertified", "quality_below_threshold", "budget_infeasible", "expired_quote", "dominated"
+]
 
 # The maximum number of suppliers combined into one sourcing option.
 # ARCHITECTURE.md §1's own justification for brute force over MILP/OR-Tools:
@@ -238,10 +261,17 @@ class SolverResult(BaseModel):
 # ==========================================================================
 
 
-def _is_certified(supplier: SupplierRecord) -> bool:
-    """Holds at least one certification. See the module docstring's
-    "Certified" section for exactly what this is grounded in."""
-    return len(supplier.certifications) > 0
+def _meets_certification_requirement(supplier: SupplierRecord, component: InventoryRecord) -> bool:
+    """Holds every certification the COMPONENT requires — a component
+    requiring none passes trivially. See the module docstring's "Certified"
+    section."""
+    return set(component.required_certifications).issubset(set(supplier.certifications))
+
+
+def _meets_quality_requirement(supplier: SupplierRecord, component: InventoryRecord) -> bool:
+    """quality_score at or above the COMPONENT's own required threshold.
+    See the module docstring's "Quality" section."""
+    return supplier.quality_score >= component.required_quality_score
 
 
 def _min_commitment_cost(supplier: SupplierRecord) -> float:
@@ -254,26 +284,64 @@ def _min_commitment_cost(supplier: SupplierRecord) -> float:
 def hard_filter(
     store: Store, component_id: str, *, po_id: Optional[str] = None
 ) -> tuple[list[SupplierRecord], list[Rejection]]:
-    """Drop uncertified or budget-infeasible suppliers using `GET /suppliers`
+    """Drop uncertified, quality-below-threshold, or budget-infeasible
+    suppliers using `GET /suppliers` and `GET /inventory/{component_id}`
     data alone — no RFQ call spent on anyone who doesn't survive this.
 
-    Budget feasibility reuses `store.check_approval` (§5.8) for threshold
-    selection (the named PO's `approval_required_above`, else the global
-    default) rather than re-deriving that rule here.
+    Certification and quality are both read off the COMPONENT's own
+    requirement fields (`InventoryRecord.required_certifications` /
+    `required_quality_score`) — per-component, not a single global rule; a
+    component seeded with no requirement passes both trivially. Budget
+    feasibility reuses `store.check_approval` (§5.8) for threshold selection
+    (the named PO's `approval_required_above`, else the global default)
+    rather than re-deriving that rule here.
     """
     survivors: list[SupplierRecord] = []
     rejections: list[Rejection] = []
 
+    component = store.get_inventory(component_id)
+    # No inventory row for this component_id is a dataset gap, not a
+    # supplier's fault — _meets_*_requirement already default to "no
+    # requirement" behaviour when given an empty/zero component fallback.
+    requirement_component = component or InventoryRecord(
+        component_id=component_id, name="", current_stock=0, usable_stock=0,
+        daily_usage=0, safety_stock=0, warehouse="", last_updated=clock.now(),
+    )
+
     for supplier in sorted(
         store.list_suppliers(component_id=component_id), key=lambda s: s.supplier_id
     ):
-        if not _is_certified(supplier):
+        if not _meets_certification_requirement(supplier, requirement_component):
+            missing = sorted(
+                set(requirement_component.required_certifications) - set(supplier.certifications)
+            )
             rejections.append(
                 Rejection(
                     subject=supplier.supplier_id,
                     reason="uncertified",
                     note=(
-                        f"{supplier.supplier_id} holds no certifications — "
+                        f"{supplier.supplier_id} is missing certification(s) "
+                        f"{missing} required for {component_id} — dropped "
+                        "before spending an RFQ call."
+                    ),
+                    estimated_unit_price=supplier.unit_price,
+                    lead_time_days=supplier.lead_time_days,
+                    reliability_score=supplier.reliability_score,
+                    quality_score=supplier.quality_score,
+                )
+            )
+            continue
+
+        if not _meets_quality_requirement(supplier, requirement_component):
+            rejections.append(
+                Rejection(
+                    subject=supplier.supplier_id,
+                    reason="quality_below_threshold",
+                    note=(
+                        f"{supplier.supplier_id}'s quality_score "
+                        f"({supplier.quality_score}) is below {component_id}'s "
+                        f"required threshold "
+                        f"({requirement_component.required_quality_score}) — "
                         "dropped before spending an RFQ call."
                     ),
                     estimated_unit_price=supplier.unit_price,

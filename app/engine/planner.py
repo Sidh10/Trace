@@ -167,57 +167,43 @@ total_price`, which solver.py computed from actual RFQ quote unit prices
 (§5.7) times allocated quantity. Nothing here re-estimates or rounds it.
 
 --------------------------------------------------------------------------
-cost_of_inaction — searched twice, genuinely absent, not invented
+cost_of_inaction — CORRECTED: a structured object, not a money figure
 --------------------------------------------------------------------------
-Searched this repo's docs (AGENTS.md, ARCHITECTURE.md, PROJECT.md, BRAND.md
-— the only spec material present) TWICE, the second pass specifically for
-penalty clauses, shutdown-cost-per-day, lost-production-value, or any
-consequence-framed (not process-framed) language — SLA terms, contract
-clauses, damages, late fees. Found none. ARCHITECTURE.md §7's `340000` is an
-ILLUSTRATIVE value in an example JSON blob, not a worked calculation. One
-directly relevant finding: ARCHITECTURE.md §5 explicitly FORBIDS "customer
-SLA tiers" as out-of-domain ("wrong domain") — the team already decided not
-to build the one mechanism (SLA penalty terms) that would most naturally
-supply this number, which is further evidence it was never meant to come
-from an invented SLA layer.
+A previous session searched this repo's docs twice, found no penalty
+clause, shutdown-cost-per-day, or lost-production-value figure anywhere,
+and left `Plan.cost_of_inaction` as `None`. That search was right — no such
+figure exists in this repo's spec material — but the CONCLUSION was wrong:
+the real problem statement (authoritative, supplied 2026-08-23) contains no
+monetary basis either, and the fix is not to keep hunting for money, it's to
+stop representing this as a money field at all. `Plan.cost_of_inaction` is
+now `CostOfInaction`, a structured, non-monetary object — every field
+derivable from spec fields already in the Store or already computed by
+`allocate_stock` / `_reschedule_actions`, never `None` at the `Plan` level.
 
-Also checked whether the ONE concrete proxy formula floated during this
-build — "lost production value = units not shipped × their per-unit
-committed price" — is even computable from this schema. It is not:
-`schemas.py` has exactly five monetary fields (`PurchaseOrder.unit_price` /
-`total_value`, `SupplierRecord.unit_price`, `RFQQuote.unit_price`,
-`ApprovalCheckRequest/Response.estimated_cost`), and every one of them is
-PROCUREMENT-side — what WE pay a supplier for a component. Nothing anywhere
-represents what a FINISHED product is worth, what a customer pays, or any
-per-day/per-unit penalty. `ProductionOrder` (§5.4) has no price field at
-all. The proxy's own "if that data exists in the schema" condition is not
-met.
+`production_orders_at_risk` — one entry per order this plan does NOT get to
+its own deadline (`AllocationDetail.on_time is False`), each carrying:
+  - `units_unbuilt` = `component_required - allocated_on_hand` — the portion
+    that depends on supply not yet physically in hand. On-hand is the only
+    figure guaranteed available regardless of what this plan does next,
+    so it is the honest floor for "how much is actually missing," not the
+    optimistic `shortfall` (which counts incoming supply as already secured).
+  - `deadline_missed_by_days` = the matching `ProductionRescheduleAction.
+    delay_days` when one exists (reused, not recomputed — one formula, one
+    owner), else `None` for an order whose shortfall is never fully covered
+    by this plan at all (no completion day exists to report).
 
-Considered, and rejected, two fallback proxies built ONLY from data that
-does exist:
-  - Valuing the shortfall at a real, solved unit price (e.g.
-    `quantity_needed × cheapest quoted unit_price`) is CIRCULAR with
-    `total_cost` — it is the same purchase, priced the same way, so it
-    cannot answer "what happens if we DON'T buy it," only restate "what
-    buying it costs" under a different label. That would be worse than an
-    honest `None`: a number that LOOKS like an independent finding but
-    isn't one.
-  - Valuing the downtime by `shortfall_days × daily_usage × unit_price`
-    (raw material that would sit unconsumed during a stoppage) requires an
-    ASSUMED TIME HORIZON for "how long does doing nothing last" — nothing
-    in this simulation defines when an unaddressed shortage ends. Picking a
-    horizon (a week? a month?) would be exactly the kind of invented
-    number AGENTS.md rule 7 forbids, just relocated one step earlier in the
-    formula.
-
-Per AGENTS.md rule 7 (never invent a metric and display it as a finding),
-`Plan.cost_of_inaction` stays `None`, with `cost_of_inaction_note` carrying
-this full reasoning — not a one-line shrug — so it reads as a checked,
-disclosed decision, not an unexamined gap. Logged in OPEN_ITEMS.md as
-BLOCKING for the demo: this field is the punchline of Beat 4's
-"IF REJECTED:" line and the escalation brief's headline number. If the real
-problem statement (not present in this repo) turns out to define a basis,
-wire it in before the demo — do not let this ship as `None` on stage.
+`cost_increase_vs_baseline_pct` — the spec's own metric (§17). "Baseline"
+is read literally as "the plan cost had no disruption occurred": the
+DELAYED purchase order for this component (the one whose failure created
+this shortfall) carries its own originally contracted `unit_price` — that
+IS what this purchase would have cost absent the disruption. Baseline total
+= that price × `chosen_combination.quantity_allocated` (same quantity as
+the actual purchase, for a fair comparison); actual = `chosen_combination.
+total_price` (real RFQ quotes, same as `total_cost`). `None` — with
+`baseline_note` explaining why — only when no delayed PO exists for this
+component: there is then no identifiable disruption to compare against, and
+fabricating one would be exactly the invented-metric problem AGENTS.md rule
+7 forbids, just relocated from a rupee figure to a percentage.
 
 --------------------------------------------------------------------------
 rejected_alternatives — solver's reasons, carried forward, not re-derived
@@ -261,26 +247,13 @@ SELECTION_RULE = (
     "further ties broken by the lowest total_price."
 )
 
-COST_OF_INACTION_NOTE = (
-    "Not computed -- searched twice, genuinely absent, not an oversight. "
-    "AGENTS.md rule 7 forbids inventing a metric and displaying it as a "
-    "finding: this repo's spec material (AGENTS.md, ARCHITECTURE.md, "
-    "PROJECT.md, BRAND.md) supplies no penalty clause, shutdown-cost-per-day, "
-    "or lost-production-value figure. The one concrete fallback considered "
-    "-- units short x their committed sale price -- has no data to compute "
-    "from: every monetary field in this schema (PurchaseOrder.unit_price, "
-    "SupplierRecord.unit_price, RFQQuote.unit_price, "
-    "ApprovalCheckRequest.estimated_cost) is a PROCUREMENT cost, and "
-    "ProductionOrder carries no price field at all. Two further fallbacks "
-    "built only from data that exists were rejected too: pricing the "
-    "shortfall at a real quote is circular with total_cost (same purchase, "
-    "relabeled); pricing downtime by day requires an invented time horizon "
-    "for 'how long does inaction last,' which is the same rule-7 violation "
-    "one step removed. ARCHITECTURE.md §7's 340000 is an illustrative "
-    "example value, not a worked calculation. Logged in OPEN_ITEMS.md as "
-    "BLOCKING for the demo -- this is Beat 4's 'IF REJECTED:' punchline; "
-    "resolve there if the real problem statement supplies a basis, not by "
-    "guessing a number here."
+NO_BASELINE_NOTE = (
+    "No delayed purchase order found for this component -- there is no "
+    "identifiable pre-disruption baseline price to compare against, so "
+    "cost_increase_vs_baseline_pct is not computed. Not the same as "
+    "inventing one (AGENTS.md rule 7): a percentage needs a real prior price "
+    "to be a percentage OF; absent a disrupted PO, there is nothing that "
+    "claims a disruption happened to this component at all."
 )
 
 
@@ -359,7 +332,33 @@ class AllocationDetail(BaseModel):
     on_time: bool
 
 
-RejectionReason = Union[DropReason, Literal["not_selected"]]
+RejectionReason = Union[DropReason, Literal["not_selected", "deadline_infeasible"]]
+
+
+class ProductionOrderAtRisk(BaseModel):
+    """One production order this plan does NOT get to its own deadline.
+    See the module docstring's "cost_of_inaction" section for exactly how
+    `units_unbuilt` / `deadline_missed_by_days` are derived."""
+
+    production_order_id: str
+    priority: Literal["low", "medium", "high"]
+    units_unbuilt: int
+    deadline_missed_by_days: Optional[int] = None
+
+
+class CostOfInaction(BaseModel):
+    """CORRECTED shape (see module docstring): structured and non-monetary,
+    never a money figure this repo's spec material has no basis for.
+
+    `baseline_total_cost` is exposed alongside the percentage so RATCHET
+    (item 6) can read the absolute rupee "cost delta vs baseline" for its
+    decision brief without re-deriving the baseline PO lookup a second
+    time — one computation, one owner."""
+
+    production_orders_at_risk: list[ProductionOrderAtRisk]
+    cost_increase_vs_baseline_pct: Optional[float] = None
+    baseline_total_cost: Optional[float] = None
+    baseline_note: str
 
 
 class RejectedAlternative(BaseModel):
@@ -390,9 +389,14 @@ class Plan(BaseModel):
     allocations: list[AllocationDetail]
     rejected_alternatives: list[RejectedAlternative]
     safety_stock_decision: SafetyStockDecision
+    # False means EVERY Pareto candidate misses a high-priority deadline —
+    # this is the chosen combination as a forced fallback (there was nothing
+    # feasible to pick from), not a genuine solution. RATCHET (item 6) reads
+    # this directly for its "no feasible plan meets a high-priority
+    # deadline" hard trigger; it does not recompute it.
+    deadline_feasible: bool
     total_cost: float
-    cost_of_inaction: Optional[float]
-    cost_of_inaction_note: str
+    cost_of_inaction: CostOfInaction
 
     def purchase_actions(self) -> list[PurchaseSplitAction]:
         return [a for a in self.actions if isinstance(a, PurchaseSplitAction)]
@@ -431,11 +435,82 @@ def reset_plan_sequence() -> None:
 def _select_combination(pareto_set: list[SourcingCombination]) -> SourcingCombination:
     """Implements SELECTION_RULE exactly: sort by
     (-reliability_score, lead_time_days, total_price) and take the first.
-    Three keys, checked in that order, nothing implicit."""
+    Three keys, checked in that order, nothing implicit.
+
+    CORRECTED: this now runs only over the DEADLINE-FEASIBLE subset of the
+    Pareto set (see `_partition_by_deadline_feasibility`), never the raw
+    `pareto_set` — reliability-first ranking must not be allowed to prefer a
+    combination that misses a high-priority deadline over one that doesn't.
+    Continuity is 35% of the rubric; reliability earns nothing on its own
+    (AGENTS.md rule 3's "no supplier meets deadline" is a hard trigger, not a
+    tie-break). Deadline feasibility is therefore a HARD FILTER applied
+    BEFORE this function ever runs, not a fourth ranking tier — a strict
+    lexicographic tier could still be beaten by a large-enough reliability
+    gap the same way lead time was; a hard filter cannot be outranked by
+    anything, because infeasible options never reach the ranking at all.
+    """
     return sorted(
         pareto_set,
         key=lambda c: (-c.reliability_score, c.lead_time_days, c.total_price),
     )[0]
+
+
+def _is_deadline_feasible(
+    combination: SourcingCombination,
+    coverage_results: list[CoverageResult],
+    on_hand_operating: int,
+) -> bool:
+    """True if allocating THIS combination (against the reserve-respecting
+    on-hand pool `allocate_stock` already uses) gets every HIGH-priority
+    order sharing this component to its own deadline. Medium/low-priority
+    misses are NOT infeasibility — they stay `_reschedule_actions`'s job,
+    matching PROJECT.md §4 Beat 4's own narrative (PROD-914, low priority,
+    gets rescheduled, not treated as a blocking failure). Only high-priority
+    misses are hard-filtered, matching AGENTS.md rule 3's own escalation
+    framing and Production Continuity's 35% rubric weight.
+    """
+    allocations = allocate_stock(coverage_results, on_hand_operating, combination)
+    return all(detail.on_time for detail in allocations if detail.priority == "high")
+
+
+def _partition_by_deadline_feasibility(
+    pareto_set: list[SourcingCombination],
+    coverage_results: list[CoverageResult],
+    on_hand_operating: int,
+) -> tuple[list[SourcingCombination], list[SourcingCombination]]:
+    """(feasible, infeasible) — every Pareto candidate re-checked against
+    every high-priority order's deadline, using the SAME `allocate_stock`
+    the final Plan will use, not a separate estimate."""
+    feasible: list[SourcingCombination] = []
+    infeasible: list[SourcingCombination] = []
+    for combo in pareto_set:
+        if _is_deadline_feasible(combo, coverage_results, on_hand_operating):
+            feasible.append(combo)
+        else:
+            infeasible.append(combo)
+    return feasible, infeasible
+
+
+def _why_deadline_infeasible(
+    combination: SourcingCombination,
+    coverage_results: list[CoverageResult],
+    on_hand_operating: int,
+) -> str:
+    allocations = allocate_stock(coverage_results, on_hand_operating, combination)
+    missed = [
+        detail for detail in allocations if detail.priority == "high" and not detail.on_time
+    ]
+    parts = []
+    for detail in missed:
+        if detail.earliest_full_supply_day is None:
+            parts.append(f"{detail.production_order_id} (never fully supplied)")
+        else:
+            parts.append(
+                f"{detail.production_order_id} (ready day "
+                f"{detail.earliest_full_supply_day:.1f}, deadline day "
+                f"{detail.days_to_deadline:.1f})"
+            )
+    return "misses high-priority deadline(s): " + ", ".join(parts)
 
 
 def _why_not_selected(chosen: SourcingCombination, candidate: SourcingCombination) -> str:
@@ -720,10 +795,18 @@ def _safety_stock_decision(
 
 def _rejected_alternatives(
     solver_rejections: list[Rejection],
-    pareto_set: list[SourcingCombination],
+    feasible_set: list[SourcingCombination],
+    infeasible_set: list[SourcingCombination],
+    coverage_results: list[CoverageResult],
+    on_hand_operating: int,
     chosen: SourcingCombination,
     chosen_total_cost: float,
 ) -> list[RejectedAlternative]:
+    """`feasible_set` / `infeasible_set` are `_partition_by_deadline_
+    feasibility`'s own output — two distinct reasons, never conflated:
+    `deadline_infeasible` (missed a high-priority deadline, dropped before
+    ranking) vs `not_selected` (feasible, but lost on SELECTION_RULE's own
+    tiers)."""
     alternatives: list[RejectedAlternative] = []
 
     for rejection in solver_rejections:
@@ -744,7 +827,19 @@ def _rejected_alternatives(
             )
         )
 
-    for combo in pareto_set:
+    for combo in infeasible_set:
+        if combo is chosen:
+            continue  # the forced-fallback case — chosen is not its own rejection
+        alternatives.append(
+            RejectedAlternative(
+                option=combo.label,
+                saved=round(combo.total_price - chosen_total_cost, 2),
+                regret=_why_deadline_infeasible(combo, coverage_results, on_hand_operating),
+                reason="deadline_infeasible",
+            )
+        )
+
+    for combo in feasible_set:
         if combo is chosen:
             continue
         alternatives.append(
@@ -757,6 +852,74 @@ def _rejected_alternatives(
         )
 
     return alternatives
+
+
+# ==========================================================================
+# Stage 5 — cost_of_inaction: structured, non-monetary (see module docstring)
+# ==========================================================================
+
+
+def _baseline_unit_price(store: Store, component_id: str) -> Optional[float]:
+    """The price already committed to before the disruption — a delayed
+    PO's own contracted `unit_price`. "Baseline = the plan cost had no
+    disruption occurred" read literally: the specific PO whose delay
+    created this shortfall is exactly what "no disruption" would have cost.
+    `None` when no delayed PO exists for this component — see
+    `NO_BASELINE_NOTE`. The minimum, when several: the best price the
+    disruption is actually costing us against."""
+    delayed = [
+        po
+        for po in store.list_purchase_orders(component_id=component_id)
+        if po.status == "delayed"
+    ]
+    if not delayed:
+        return None
+    return min(po.unit_price for po in delayed)
+
+
+def _compute_cost_of_inaction(
+    store: Store,
+    component_id: str,
+    chosen: SourcingCombination,
+    allocations: list[AllocationDetail],
+    reschedules: list[ProductionRescheduleAction],
+) -> CostOfInaction:
+    reschedule_delay_by_order = {a.production_order_id: a.delay_days for a in reschedules}
+
+    at_risk = [
+        ProductionOrderAtRisk(
+            production_order_id=detail.production_order_id,
+            priority=detail.priority,
+            units_unbuilt=max(0, detail.component_required - detail.allocated_on_hand),
+            deadline_missed_by_days=reschedule_delay_by_order.get(detail.production_order_id),
+        )
+        for detail in allocations
+        if not detail.on_time
+    ]
+
+    baseline_price = _baseline_unit_price(store, component_id)
+    if baseline_price is None or baseline_price <= 0:
+        return CostOfInaction(
+            production_orders_at_risk=at_risk,
+            cost_increase_vs_baseline_pct=None,
+            baseline_note=NO_BASELINE_NOTE,
+        )
+
+    baseline_total = baseline_price * chosen.quantity_allocated
+    pct = round((chosen.total_price - baseline_total) / baseline_total * 100, 2)
+    return CostOfInaction(
+        production_orders_at_risk=at_risk,
+        cost_increase_vs_baseline_pct=pct,
+        baseline_total_cost=round(baseline_total, 2),
+        baseline_note=(
+            f"Baseline = {component_id}'s delayed PO's own contracted "
+            f"unit_price ({baseline_price}) x quantity_allocated "
+            f"({chosen.quantity_allocated}) = {baseline_total:.2f} — what "
+            "this purchase would have cost had no disruption occurred. "
+            f"Actual = chosen_combination.total_price ({chosen.total_price}), "
+            "from real RFQ quotes."
+        ),
+    )
 
 
 # ==========================================================================
@@ -790,8 +953,6 @@ def run_planner(
     if not solver_result.pareto_set:
         return None
 
-    chosen = _select_combination(solver_result.pareto_set)
-
     inventory = store.get_inventory(component_id)
     usable_stock = inventory.usable_stock if inventory is not None else 0
     safety_stock = inventory.safety_stock if inventory is not None else 0
@@ -800,7 +961,28 @@ def run_planner(
     # Item 5b: allocation draws from the OPERATING buffer by default, not the
     # full usable_stock — the reserve is only spent through the explicit,
     # justified mechanism below. See the module docstring's "Item 5b" section.
+    # Computed BEFORE selection now (moved up from where item 5 originally
+    # had it) because the deadline-feasibility hard filter below needs it to
+    # run allocate_stock against EVERY Pareto candidate, not just the chosen
+    # one.
     on_hand_operating = max(0, usable_stock - safety_stock)
+
+    # CORRECTED selection: deadline feasibility is a HARD FILTER before
+    # ranking, not a ranking tier — see _select_combination's docstring for
+    # why a tier isn't enough. Falls back to the full Pareto set only when
+    # NOTHING is feasible, so RATCHET (item 6) still has a concrete plan to
+    # build an escalation brief around; `deadline_feasible=False` is exactly
+    # its "no feasible plan meets a high-priority deadline" trigger.
+    feasible, infeasible = _partition_by_deadline_feasibility(
+        solver_result.pareto_set, coverage_results, on_hand_operating
+    )
+    selection_pool = feasible if feasible else solver_result.pareto_set
+    chosen = _select_combination(selection_pool)
+    # Identity, not `in` (which would use pydantic's structural __eq__ and
+    # could false-positive if two distinct combinations were ever built with
+    # identical field values).
+    deadline_feasible = any(c is chosen for c in feasible)
+
     baseline_allocations = allocate_stock(coverage_results, on_hand_operating, chosen)
 
     safety_stock_decision = _safety_stock_decision(
@@ -850,7 +1032,17 @@ def run_planner(
     ]
 
     rejected = _rejected_alternatives(
-        solver_result.rejected, solver_result.pareto_set, chosen, chosen.total_price
+        solver_result.rejected,
+        feasible,
+        infeasible,
+        coverage_results,
+        on_hand_operating,
+        chosen,
+        chosen.total_price,
+    )
+
+    cost_of_inaction = _compute_cost_of_inaction(
+        store, component_id, chosen, allocations, reschedules
     )
 
     return Plan(
@@ -863,7 +1055,7 @@ def run_planner(
         allocations=allocations,
         rejected_alternatives=rejected,
         safety_stock_decision=safety_stock_decision,
+        deadline_feasible=deadline_feasible,
         total_cost=chosen.total_price,
-        cost_of_inaction=None,
-        cost_of_inaction_note=COST_OF_INACTION_NOTE,
+        cost_of_inaction=cost_of_inaction,
     )

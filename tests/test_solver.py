@@ -2,8 +2,13 @@
 
 The two hidden tests item 4 owns (ARCHITECTURE.md §10) are the tests that
 matter most here:
-  - "Cheapest supplier fails quality" — SUP-18 (cheapest, fastest, but
-    uncertified) must be dropped by the cert filter before any RFQ call.
+  - "Cheapest supplier fails quality" — SUP-18 (cheapest, fastest) must be
+    dropped by the hard filter before any RFQ call. CORRECTED from an
+    earlier session that read this as a certification failure: the problem
+    statement's own model answer rejects SUP-18 on `quality_score`, not
+    certifications — SUP-18 holds every certification COMP-104 requires and
+    is dropped by the SEPARATE, independent quality check. See solver.py's
+    module docstring.
   - "Low-reliability supplier is fastest" — once VERIFY (item 3) downgrades
     SUP-21 after the PO-7712 contradiction, it is both the fastest COMP-104
     option AND the least reliable. Pareto must surface it, not silently drop
@@ -23,7 +28,8 @@ from app.engine.solver import (
     Rejection,
     SourcingCombination,
     _dominates,
-    _is_certified,
+    _meets_certification_requirement,
+    _meets_quality_requirement,
     fetch_valid_quotes,
     hard_filter,
     pareto_front,
@@ -65,24 +71,32 @@ def _downgrade_sup21_via_verify(store):
 # ==========================================================================
 
 
-def test_sup18_is_cheapest_and_fastest_but_uncertified(store):
+def test_sup18_is_cheapest_and_fastest_but_below_quality_threshold(store):
     """The precondition that makes this a real test, not a vacuous one."""
     sup18 = store.suppliers["SUP-18"]
     others = [s for s in store.list_suppliers(component_id="COMP-104") if s.supplier_id != "SUP-18"]
+    comp104 = store.get_inventory("COMP-104")
 
     assert sup18.unit_price < min(o.unit_price for o in others)
     assert sup18.lead_time_days <= min(o.lead_time_days for o in others)
-    assert sup18.certifications == []
+    # Certified — holds everything COMP-104 requires. The rejection must NOT
+    # be explainable by a cert gap, or this isn't testing quality at all.
+    assert set(comp104.required_certifications).issubset(set(sup18.certifications))
+    assert sup18.quality_score < comp104.required_quality_score
 
 
-def test_sup18_is_dropped_before_any_rfq_call(store):
-    """The cert filter must catch it using GET /suppliers data alone — no
-    RFQ call spent proving what was already knowable."""
+def test_sup18_is_dropped_before_any_rfq_call_on_quality_not_certification(store):
+    """The hard filter must catch it using GET /suppliers +
+    GET /inventory/{component_id} data alone — no RFQ call spent proving
+    what was already knowable. The reason must specifically be quality, not
+    certification — that's the corrected, problem-statement-accurate
+    behaviour (see solver.py's module docstring)."""
     survivors, rejections = hard_filter(store, "COMP-104")
 
     assert "SUP-18" not in [s.supplier_id for s in survivors]
     rejection = next(r for r in rejections if r.subject == "SUP-18")
-    assert rejection.reason == "uncertified"
+    assert rejection.reason == "quality_below_threshold"
+    assert not any(r.subject == "SUP-18" and r.reason == "uncertified" for r in rejections)
 
     assert len(store.rfq_log) == 0  # no RFQ tool call has happened yet
 
@@ -92,21 +106,78 @@ def test_sup18_never_reaches_the_pareto_set(store):
 
     for combo in result.pareto_set:
         assert "SUP-18" not in combo.supplier_ids
-    assert any(r.subject == "SUP-18" and r.reason == "uncertified" for r in result.rejected)
-
-
-def test_certified_means_holding_at_least_one_certification():
-    from app.environment.schemas import SupplierRecord
-
-    certified = SupplierRecord(
-        supplier_id="X", supplier_name="x", component_id="COMP-104", unit_price=1,
-        lead_time_days=1, available_quantity=1, quality_score=0.5, reliability_score=0.5,
-        min_order_quantity=1, certifications=["ISO-9001"],
+    assert any(
+        r.subject == "SUP-18" and r.reason == "quality_below_threshold" for r in result.rejected
     )
-    uncertified = certified.model_copy(update={"certifications": []})
 
-    assert _is_certified(certified) is True
-    assert _is_certified(uncertified) is False
+
+def test_certification_requirement_is_per_component_and_trivially_passes_when_empty():
+    from app.environment.schemas import InventoryRecord, SupplierRecord
+
+    no_cert_required = InventoryRecord(
+        component_id="COMP-X", name="x", current_stock=0, usable_stock=0,
+        daily_usage=1, safety_stock=0, warehouse="x", last_updated=NOW,
+    )
+    iso_required = no_cert_required.model_copy(update={"required_certifications": ["ISO-9001"]})
+
+    uncertified_supplier = SupplierRecord(
+        supplier_id="X", supplier_name="x", component_id="COMP-X", unit_price=1,
+        lead_time_days=1, available_quantity=1, quality_score=0.5, reliability_score=0.5,
+        min_order_quantity=1, certifications=[],
+    )
+
+    # A component with no requirement passes trivially, regardless of what
+    # the supplier holds — "some components require certified suppliers,"
+    # not all.
+    assert _meets_certification_requirement(uncertified_supplier, no_cert_required) is True
+    # The SAME supplier fails once the component actually requires something.
+    assert _meets_certification_requirement(uncertified_supplier, iso_required) is False
+
+    certified_supplier = uncertified_supplier.model_copy(
+        update={"certifications": ["ISO-9001", "Automotive-Grade"]}
+    )
+    assert _meets_certification_requirement(certified_supplier, iso_required) is True
+
+
+def test_quality_requirement_reads_the_components_own_threshold():
+    from app.environment.schemas import InventoryRecord, SupplierRecord
+
+    component = InventoryRecord(
+        component_id="COMP-X", name="x", current_stock=0, usable_stock=0,
+        daily_usage=1, safety_stock=0, warehouse="x", last_updated=NOW,
+        required_quality_score=0.85,
+    )
+    high_quality = SupplierRecord(
+        supplier_id="X", supplier_name="x", component_id="COMP-X", unit_price=1,
+        lead_time_days=1, available_quantity=1, quality_score=0.9, reliability_score=0.5,
+        min_order_quantity=1, certifications=[],
+    )
+    low_quality = high_quality.model_copy(update={"quality_score": 0.5})
+
+    assert _meets_quality_requirement(high_quality, component) is True
+    assert _meets_quality_requirement(low_quality, component) is False
+
+
+def test_a_component_with_no_seeded_requirement_rejects_nobody_on_cert_or_quality(store):
+    """Every generated component besides COMP-104 defaults to no
+    requirement — the additive fields' own default, not a per-component
+    seed decision. Confirms the hard filter doesn't invent a requirement
+    where none was seeded. Picks a generated component that actually has
+    suppliers, so the "rejects nobody" assertion means something."""
+    generated_component_id = next(
+        c.component_id
+        for c in store.list_inventory()
+        if c.component_id != "COMP-104" and store.list_suppliers(component_id=c.component_id)
+    )
+    component = store.get_inventory(generated_component_id)
+    assert component.required_certifications == []
+    assert component.required_quality_score == 0.0
+
+    survivors, rejections = hard_filter(store, generated_component_id)
+    assert len(survivors) == len(store.list_suppliers(component_id=generated_component_id))
+    assert not [
+        r for r in rejections if r.reason in ("uncertified", "quality_below_threshold")
+    ]
 
 
 # ==========================================================================
@@ -404,7 +475,9 @@ def test_single_supplier_option_is_not_duplicated_as_a_two_way_split(store):
 
 def test_every_rejection_carries_a_named_reason(store):
     result = run_solver(store, component_id="COMP-104", quantity_needed=900, now=NOW)
-    valid_reasons = {"uncertified", "budget_infeasible", "expired_quote", "dominated"}
+    valid_reasons = {
+        "uncertified", "quality_below_threshold", "budget_infeasible", "expired_quote", "dominated",
+    }
     for rejection in result.rejected:
         assert rejection.reason in valid_reasons
 
@@ -417,11 +490,11 @@ def test_solver_does_not_compute_a_dollar_saved_figure():
 
 def test_rejections_carry_the_comparable_figures_item_5_needs(store):
     result = run_solver(store, component_id="COMP-104", quantity_needed=900, now=NOW)
-    uncertified = next(r for r in result.rejected if r.reason == "uncertified")
-    assert uncertified.estimated_unit_price is not None
-    assert uncertified.lead_time_days is not None
-    assert uncertified.reliability_score is not None
-    assert uncertified.quality_score is not None
+    quality_rejected = next(r for r in result.rejected if r.reason == "quality_below_threshold")
+    assert quality_rejected.estimated_unit_price is not None
+    assert quality_rejected.lead_time_days is not None
+    assert quality_rejected.reliability_score is not None
+    assert quality_rejected.quality_score is not None
 
 
 # ==========================================================================

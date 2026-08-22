@@ -17,8 +17,8 @@ import pytest
 from app.engine.coverage import CoverageResult, compute_coverage, reset_event_sequence
 from app.engine.monitor import run_monitor_cycle
 from app.engine.planner import (
-    COST_OF_INACTION_NOTE,
     SELECTION_RULE,
+    _is_deadline_feasible,
     _select_combination,
     _sort_orders,
     allocate_stock,
@@ -423,11 +423,15 @@ def test_purchase_action_unit_prices_match_the_quote_not_a_recomputed_figure(sto
 
 
 # ==========================================================================
-# cost_of_inaction — not invented
+# cost_of_inaction — CORRECTED: structured, non-monetary, never None
 # ==========================================================================
 
 
-def test_cost_of_inaction_is_none_not_a_guessed_number(store):
+def test_cost_of_inaction_is_never_none_at_the_plan_level(store):
+    """Plan.cost_of_inaction must always be a CostOfInaction object — the
+    OLD design (a bare Optional[float] that stayed None) is what this
+    corrects. The structured payload can legitimately show "nothing at
+    risk," but the field itself is never bare None."""
     combo = _combo("X", price=1000, lead=3, reliability=0.8, qty=100, moq=10, avail=100)
     result = SolverResult(
         computed_at=NOW, component_id="COMP-X", quantity_needed=100,
@@ -436,36 +440,120 @@ def test_cost_of_inaction_is_none_not_a_guessed_number(store):
     cov = _coverage_result("PROD-A", "high", days_to_deadline=10, component_required=100)
     plan = run_planner(store, "COMP-X", result, [cov], now=NOW)
 
-    assert plan.cost_of_inaction is None
-    assert plan.cost_of_inaction_note == COST_OF_INACTION_NOTE
-    assert "not" in plan.cost_of_inaction_note.lower()
+    assert plan.cost_of_inaction is not None
+    assert isinstance(plan.cost_of_inaction.production_orders_at_risk, list)
 
 
-def test_no_numeric_cost_of_inaction_formula_exists_in_the_source():
-    """The illustrative 340000 from ARCHITECTURE.md §7 may be discussed in
-    prose (explaining why it's NOT used) but must never be assigned as a
-    computed value anywhere in this module."""
+def test_no_numeric_cost_of_inaction_placeholder_lingers_in_the_source():
+    """The illustrative 340000 from ARCHITECTURE.md §7 must never be
+    assigned as a computed value anywhere in this module."""
     source = open("app/engine/planner.py", encoding="utf-8").read()
-    assert "cost_of_inaction=340000" not in source.replace(" ", "")
-    assert "cost_of_inaction = 340000" not in source
     assert "= 340000" not in source
     assert "=340000" not in source
 
 
-def test_cost_of_inaction_note_is_a_reasoned_decision_not_a_one_line_shrug():
-    """The note must show the search was real: what was checked, what the
-    one concrete fallback formula needed and didn't have, and why two
-    further fallbacks built from data that DOES exist were still rejected
-    (circularity with total_cost; an invented time horizon). A one-liner
-    here would fail the same "don't silently treat None as done" bar the
-    field itself exists to satisfy."""
-    note = COST_OF_INACTION_NOTE.lower()
-    assert "committed sale price" in note or "committed" in note
-    assert "procurement" in note
-    assert "circular" in note
-    assert "time horizon" in note
-    assert "blocking" in note
-    assert len(COST_OF_INACTION_NOTE) > 400  # not a boilerplate sentence
+def test_production_orders_at_risk_lists_only_orders_missing_their_deadline(store):
+    tight = _coverage_result(
+        "PROD-TIGHT", "low", days_to_deadline=1.0, component_required=100
+    )
+    combo = _combo("X", price=1000, lead=9, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    plan = run_planner(store, "COMP-X", result, [tight], now=NOW)
+
+    at_risk = plan.cost_of_inaction.production_orders_at_risk
+    assert len(at_risk) == 1
+    entry = at_risk[0]
+    assert entry.production_order_id == "PROD-TIGHT"
+    assert entry.priority == "low"
+    # deadline_missed_by_days must match the SAME reschedule action's
+    # delay_days -- reused, not recomputed.
+    reschedule = plan.reschedule_actions()[0]
+    assert entry.deadline_missed_by_days == reschedule.delay_days
+
+
+def test_units_unbuilt_uses_on_hand_only_as_the_honest_floor(store):
+    """units_unbuilt = component_required - allocated_on_hand, NOT the
+    optimistic shortfall (which would count not-yet-arrived incoming supply
+    as already secured)."""
+    tight = _coverage_result(
+        "PROD-TIGHT", "high", days_to_deadline=1.0, component_required=300
+    )
+    combo = _combo("X", price=1000, lead=9, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    plan = run_planner(store, "COMP-X", result, [tight], now=NOW)
+
+    detail = plan.allocations[0]
+    entry = plan.cost_of_inaction.production_orders_at_risk[0]
+    assert entry.units_unbuilt == detail.component_required - detail.allocated_on_hand
+
+
+def test_no_orders_at_risk_when_everything_is_on_time(store):
+    combo = _combo("X", price=1000, lead=1, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    cov = _coverage_result("PROD-A", "high", days_to_deadline=10, component_required=100)
+    plan = run_planner(store, "COMP-X", result, [cov], now=NOW)
+
+    assert plan.cost_of_inaction.production_orders_at_risk == []
+
+
+def test_cost_increase_vs_baseline_uses_the_delayed_pos_own_contracted_price(store):
+    """Baseline = the delayed PO's own unit_price x quantity_allocated —
+    'what the plan cost had no disruption occurred,' read literally."""
+    from app.environment.schemas import InventoryRecord, PurchaseOrder
+
+    store.inventory["COMP-BASE"] = InventoryRecord(
+        component_id="COMP-BASE", name="x", current_stock=0, usable_stock=0,
+        daily_usage=1, safety_stock=0, warehouse="x", last_updated=NOW,
+    )
+    store.purchase_orders["PO-BASE"] = PurchaseOrder(
+        po_id="PO-BASE", component_id="COMP-BASE", supplier_id="SUP-OLD",
+        quantity=100, expected_delivery=NOW.date(), status="delayed",
+        unit_price=100.0, total_value=10000.0, approval_required_above=150000,
+    )
+    combo = _combo("X", price=1200, lead=3, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-BASE", quantity_needed=100,
+        pareto_set=[combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    cov = _coverage_result(
+        "PROD-A", "high", days_to_deadline=10, component_required=100,
+        component_id="COMP-BASE",
+    )
+    plan = run_planner(store, "COMP-BASE", result, [cov], now=NOW)
+
+    # combo.total_price = 1200 for qty=100 (unit_price=12); baseline =
+    # 100 (PO-BASE's unit_price) x 100 = 10000. Actual total_price is 1200,
+    # not 1200*100 -- _combo builds unit_price = price/qty internally.
+    baseline_total = 100.0 * combo.quantity_allocated
+    expected_pct = round((combo.total_price - baseline_total) / baseline_total * 100, 2)
+    assert plan.cost_of_inaction.cost_increase_vs_baseline_pct == expected_pct
+    assert "PO-BASE" not in plan.cost_of_inaction.baseline_note  # cites the PRICE, not the id
+    assert "100.0" in plan.cost_of_inaction.baseline_note or "100" in plan.cost_of_inaction.baseline_note
+
+
+def test_cost_increase_vs_baseline_is_none_with_a_note_when_no_delayed_po_exists(store):
+    """Not the same as inventing a baseline -- absent a disrupted PO, there
+    is nothing to claim a disruption happened at all."""
+    combo = _combo("X", price=1000, lead=3, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    cov = _coverage_result("PROD-A", "high", days_to_deadline=10, component_required=100)
+    plan = run_planner(store, "COMP-X", result, [cov], now=NOW)
+
+    assert plan.cost_of_inaction.cost_increase_vs_baseline_pct is None
+    assert "no delayed" in plan.cost_of_inaction.baseline_note.lower()
+    assert "not compute" in plan.cost_of_inaction.baseline_note.lower() or "not the same" in plan.cost_of_inaction.baseline_note.lower()
 
 
 # ==========================================================================
@@ -519,10 +607,11 @@ def test_non_chosen_pareto_members_become_not_selected_alternatives(store):
 
 def test_planner_does_not_re_derive_solver_rejection_reasons(store):
     """Structural: planner.py must not contain its own copy of solver's
-    DropReason logic (cert/budget/expiry checks) -- it only reads Rejection
-    objects solver already produced."""
+    DropReason logic (cert/quality/budget/expiry checks) -- it only reads
+    Rejection objects solver already produced."""
     source = open("app/engine/planner.py", encoding="utf-8").read()
-    assert "_is_certified" not in source
+    assert "_meets_certification_requirement" not in source
+    assert "_meets_quality_requirement" not in source
     assert "min_order_quantity * " not in source  # no re-derived budget math
 
 
@@ -647,36 +736,37 @@ def test_smoke_against_the_real_current_state(store):
     assert sup21_alt.saved < 0
     assert "reliability_score" in sup21_alt.regret
 
-    assert plan.cost_of_inaction is None
+    # cost_of_inaction: no orders at risk (confirmed above, both on time),
+    # and PO-7712 (delayed as part of this exact scenario) supplies a real
+    # baseline — its own contracted unit_price (118).
+    assert plan.cost_of_inaction.production_orders_at_risk == []
+    assert plan.cost_of_inaction.cost_increase_vs_baseline_pct is not None
+    baseline_total = 118.0 * plan.chosen_combination.quantity_allocated
+    expected_pct = round(
+        (plan.chosen_combination.total_price - baseline_total) / baseline_total * 100, 2
+    )
+    assert plan.cost_of_inaction.cost_increase_vs_baseline_pct == expected_pct
 
 
 # ==========================================================================
-# Adversarial — a confirmed, logged gap: nothing yet catches "this reschedule
-# is too large to accept." Not fixed here; item 6 (RATCHET) is the
-# architecturally correct place, per AGENTS.md rule 3's own named trigger
-# "no supplier meets deadline -> escalate." See OPEN_ITEMS.md.
+# Adversarial — CORRECTED: the gap this test used to confirm is now fixed.
+# Deadline feasibility is a HARD FILTER before ranking (task instruction
+# [3]) — a combination that misses a high-priority deadline is dropped
+# before SELECTION_RULE ever compares it against anything else, so a large
+# reliability advantage can no longer buy its way past a missed deadline.
 # ==========================================================================
 
 
-def test_ADVERSARIAL_reliability_first_choice_can_silently_blow_a_deadline_reschedule_would_have_avoided(
+def test_ADVERSARIAL_higher_reliability_combination_missing_the_deadline_is_now_filtered_not_chosen(
     store,
 ):
-    """Construct a Pareto set where SELECTION_RULE's own reliability-first
-    tier picks a candidate whose delivery lands 15 days past a HIGH-priority
-    order's 5-day deadline, while the REJECTED alternative (SUP-RISKY) would
-    have made that same deadline comfortably (2 days).
-
-    This is not a bug in allocate_stock or _reschedule_actions — delay_days
-    is computed correctly (ceil(20 - 5) = 15) and the action is tagged
-    correctly (reversible). The gap is architectural: nothing in this module
-    or anywhere else in the pipeline judges whether a 15-day reschedule
-    against a 5-day deadline is an ACCEPTABLE plan to hand back silently, or
-    whether "no supplier meets deadline" (AGENTS.md rule 3's own named hard
-    escalation trigger) should have fired instead of quietly rescheduling.
-    `rejected_alternatives`' regret text for the faster option only cites the
-    reliability_score it lost on — it never mentions that choosing it would
-    have hit the deadline. Logged in OPEN_ITEMS.md as an explicit
-    requirement for item 6.
+    """The exact scenario that used to expose the gap: SUP-RELIABLE (0.95
+    reliability, 20-day lead) vs SUP-RISKY (0.5 reliability, 2-day lead)
+    against a HIGH-priority order with a 5-day deadline. Confirms the fix:
+    SUP-RELIABLE is now dropped as `deadline_infeasible` BEFORE ranking,
+    and SUP-RISKY — the only candidate that actually meets the deadline —
+    is chosen, even though it would have lost SELECTION_RULE's own
+    reliability-first tier outright.
     """
     reliable_but_glacial = SourcingCombination(
         members=[
@@ -713,54 +803,79 @@ def test_ADVERSARIAL_reliability_first_choice_can_silently_blow_a_deadline_resch
         component_id="COMP-ADV",
     )
 
-    # Precondition: the rejected alternative genuinely would have made the
-    # deadline. If this ever fails, the test above isn't proving anything.
-    alt_allocation = allocate_stock([urgent], on_hand=0, combination=fast_but_risky)
-    assert alt_allocation[0].on_time is True
+    # Preconditions: SUP-RISKY genuinely meets the deadline; SUP-RELIABLE
+    # genuinely misses it. If either ever flips, this test isn't proving
+    # anything.
+    assert _is_deadline_feasible(fast_but_risky, [urgent], on_hand_operating=0) is True
+    assert _is_deadline_feasible(reliable_but_glacial, [urgent], on_hand_operating=0) is False
+
+    # Also confirmed directly: reliability-first ranking, taken alone (the
+    # OLD behavior, no hard filter), would still pick SUP-RELIABLE — proving
+    # the fix is the FILTER, not a change to SELECTION_RULE's own tiers.
+    naive_rank = _select_combination([reliable_but_glacial, fast_but_risky])
+    assert naive_rank is reliable_but_glacial
 
     plan = run_planner(store, "COMP-ADV", result, [urgent], now=NOW)
 
-    # SELECTION_RULE, exactly as documented and tested above, picks the
-    # reliable-but-glacial candidate -- reliability (0.95) beats lead time
-    # entirely, regardless of the deadline consequence.
-    assert plan.chosen_combination.supplier_ids == ["SUP-RELIABLE"]
+    # THE FIX: the deadline-missing candidate is filtered out before
+    # ranking, so the deadline-meeting one is chosen instead.
+    assert plan.chosen_combination.supplier_ids == ["SUP-RISKY"]
+    assert plan.deadline_feasible is True
 
-    # allocate_stock / _reschedule_actions compute the miss correctly and
-    # honestly -- this is NOT where the gap is.
+    # The order is on time, correctly, with no reschedule action needed.
     detail = plan.allocations[0]
-    assert detail.on_time is False
-    assert detail.earliest_full_supply_day == 20.0
+    assert detail.on_time is True
+    assert plan.reschedule_actions() == []
 
-    reschedule = plan.reschedule_actions()[0]
-    assert reschedule.production_order_id == "PROD-URGENT"
-    assert reschedule.delay_days == 15  # ceil(20 - 5), a real, large number
-
-    # THE GAP: nothing marks this plan as unacceptable. It returns a normal,
-    # well-formed Plan object -- same shape as any other -- with no signal
-    # anywhere that a HIGH-priority order just got pushed 3x past its
-    # original deadline, and no reference to AGENTS.md rule 3's "no supplier
-    # meets deadline" trigger anywhere in this module.
-    assert plan is not None  # a plan WAS produced -- nothing refused it
-    source = open("app/engine/planner.py", encoding="utf-8").read()
-    assert "no supplier meets deadline" not in source.lower()
-    # No escalation-flag field exists on Plan at all -- a caller inspecting
-    # this object has nothing to check for "does this plan actually work."
-    escalation_related_fields = [
-        f for f in type(plan).model_fields if "escalat" in f.lower() or "deadline" in f.lower()
-    ]
-    assert escalation_related_fields == []
-
-    # The rejected alternative's regret text is genuinely misleading by
-    # omission: it explains why SUP-RISKY lost (reliability), but never
-    # mentions that picking it would have hit the deadline the chosen
-    # option missed by 15 days. An auditor reading only rejected_alternatives
-    # would not learn that a viable, on-time option was passed over.
-    risky_alt = next(
-        a for a in plan.rejected_alternatives if a.option == "SUP-RISKY only"
+    # SUP-RELIABLE now appears as a rejected alternative tagged
+    # deadline_infeasible — a DIFFERENT reason than "not_selected" (a
+    # feasible-but-outranked candidate) — and its regret text names the
+    # actual order and the actual numbers, not a generic label.
+    reliable_alt = next(
+        a for a in plan.rejected_alternatives if a.option == "SUP-RELIABLE only"
     )
-    assert "deadline" not in risky_alt.regret.lower()
-    assert "on_time" not in risky_alt.regret.lower()
-    assert "reliability_score" in risky_alt.regret  # what it DOES say instead
+    assert reliable_alt.reason == "deadline_infeasible"
+    assert "PROD-URGENT" in reliable_alt.regret
+    assert "20.0" in reliable_alt.regret or "20" in reliable_alt.regret
+
+
+def test_a_feasible_but_outranked_combination_is_still_not_selected_not_infeasible(store):
+    """Deadline feasibility and SELECTION_RULE ranking must stay two
+    distinct reasons — a candidate that meets every high-priority deadline
+    but loses on reliability/lead_time/price is "not_selected," never
+    "deadline_infeasible." """
+    winner = _combo("A", price=1000, lead=3, reliability=0.9, qty=100, moq=10, avail=100)
+    loser = _combo("B", price=900, lead=3, reliability=0.5, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[winner, loser], rejected=[], quotes_requested=2, quotes_reused=0,
+    )
+    cov = _coverage_result("PROD-A", "high", days_to_deadline=10, component_required=100)
+    plan = run_planner(store, "COMP-X", result, [cov], now=NOW)
+
+    loser_alt = next(a for a in plan.rejected_alternatives if a.option == loser.label)
+    assert loser_alt.reason == "not_selected"
+
+
+def test_when_every_candidate_misses_the_deadline_the_best_one_is_still_chosen_and_flagged(store):
+    """No feasible plan at all: run_planner must not return None just
+    because nothing meets the deadline — RATCHET (item 6) needs a concrete
+    plan to build an escalation brief around. deadline_feasible=False is
+    the signal it reads."""
+    slow_a = _combo("A", price=1000, lead=20, reliability=0.9, qty=100, moq=10, avail=100)
+    slow_b = _combo("B", price=900, lead=25, reliability=0.5, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[slow_a, slow_b], rejected=[], quotes_requested=2, quotes_reused=0,
+    )
+    urgent = _coverage_result("PROD-URGENT", "high", days_to_deadline=5.0, component_required=100)
+    plan = run_planner(store, "COMP-X", result, [urgent], now=NOW)
+
+    assert plan is not None
+    assert plan.deadline_feasible is False
+    # Still ranked by SELECTION_RULE among the (infeasible) candidates —
+    # slow_a wins on reliability, same tiers as always.
+    assert plan.chosen_combination.supplier_ids == ["A"]
 
 
 # ==========================================================================
