@@ -137,6 +137,11 @@ from app.engine.verify import DETERMINISTIC_MODEL_VERSION, VerificationReport
 from app.environment.clock import clock
 from app.environment.schemas import ERPUpdateResponse
 
+# Item 10's per-call precondition report. Imported here rather than
+# constructed here — provenance.py records things, tool_audit.py decides
+# what to record.
+from app.engine.tool_audit import ToolAuditReport
+
 # ARCHITECTURE.md §7's exact relation set. Six, closed, no additions.
 Relation = Literal["Support", "Depend-on", "Contradict", "Invalidate", "Trigger", "Update"]
 
@@ -284,6 +289,9 @@ class ProvenanceGraph(BaseModel):
     regret_ledger: list[RejectedAlternative] = Field(default_factory=list)
     cost_of_inaction: Optional[CostOfInaction] = None
     tool_calls: ToolCallSummary
+    # Item 10: per-call precondition log + count-vs-necessity summary.
+    # Sits alongside `tool_calls` (item 7's counters), never replacing it.
+    tool_audit: Optional[ToolAuditReport] = None
 
     # -- integrity ---------------------------------------------------------
 
@@ -985,6 +993,7 @@ def build_provenance_graph(
     brief: Optional[DecisionBrief] = None,
     erp_writes: Optional[list[ERPUpdateResponse]] = None,
     fired_contingencies: Optional[list] = None,
+    tool_audit: Optional[ToolAuditReport] = None,
     now: Optional[datetime] = None,
 ) -> ProvenanceGraph:
     """Build the graph from whichever stages actually ran. Every argument is
@@ -1027,4 +1036,5 @@ def build_provenance_graph(
         regret_ledger=plan.rejected_alternatives if plan is not None else [],
         cost_of_inaction=plan.cost_of_inaction if plan is not None else None,
         tool_calls=_build_tool_calls(monitor, verification, solver_result, brief),
+        tool_audit=tool_audit,
     )

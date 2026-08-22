@@ -111,13 +111,13 @@ Everything above the cut-line works end to end before anything below it starts.
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
 | 8 | Staleness detector + earliest-conflict re-entry + post-replan verification (`app/engine/staleness.py`; re-entry executed by the orchestrator) | 10% | ✅ built |
 | 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | ✅ built |
-| 10 | Tool-call precondition logging + count-vs-necessity summary in audit trail | 10% | 45m |
+| 10 | Tool-call precondition logging + count-vs-necessity summary in audit trail (`app/engine/tool_audit.py`) | 10% | ✅ built |
 | 11 | **Judge-controlled disruption panel** (single HTML file) | demo | 1h |
 | 12 | Coverage board — days of coverage per production order, live | demo | 1.5h |
 | 13 | **Multi-baseline comparison harness** — see §11 below | demo | 3h |
 
-**Items 1–9 are ✅ COMPLETE — the cut-line is met, and the re-entry spine is
-now assembled through contingency fallback.** Items 10–13 are the remaining
+**Items 1–10 are ✅ COMPLETE — the cut-line is met, the re-entry spine is
+assembled through contingency fallback, and tool-call accounting is audited.** Items 11–13 are the remaining
 difference between placing and winning.
 
 **Parallelisation (3–4 people, own Claude accounts):**

@@ -102,6 +102,7 @@ from app.audit.provenance import (
     append_erp_write_edges,
     build_provenance_graph,
 )
+from app.engine.tool_audit import build_tool_audit
 from app.engine.contingency import (
     ContingencyPlan,
     FiredContingency,
@@ -487,6 +488,16 @@ def _finish(
         awaiting_approval = True
         stages.append("ERP WRITE SKIPPED (escalate — awaiting human approval)")
 
+    # Item 10: per-call precondition log, built before the graph so it can
+    # be embedded alongside item 7's counters.
+    tool_audit_report = build_tool_audit(
+        monitor=outputs.monitor,
+        verification=outputs.verification,
+        solver_result=outputs.solver_result,
+        brief=brief,
+        now=now,
+    )
+
     graph = build_provenance_graph(
         coverage=outputs.coverage,
         monitor=outputs.monitor,
@@ -496,6 +507,7 @@ def _finish(
         brief=brief,
         erp_writes=erp_writes,
         fired_contingencies=fired_contingencies or [],
+        tool_audit=tool_audit_report,
         now=now,
     )
     stages.append("AUDIT")
