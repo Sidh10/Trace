@@ -167,6 +167,7 @@ NODE_KINDS: frozenset[str] = frozenset(
         "erp",               # ERP headline stock figure, keyed by component_id
         "deadline_constraint",  # the deadline feasibility filter, keyed by component_id
         "erp_write",         # one POST /erp/update response, keyed by update_id
+        "contingency",       # a pre-committed fallback, keyed by contingency_id
     }
 )
 
@@ -769,6 +770,57 @@ def _add_erp_writes(
             )
 
 
+def _add_contingencies(builder: _Builder, plan: Plan, fired: list) -> None:
+    """Item 9's fired fallbacks, in the trail.
+
+    `Trigger` from the contingency to the plan it produced — the same
+    relation and direction `_add_disruption_to_plan` uses for an event,
+    because a fired contingency IS the cause of this plan existing. The note
+    cites the `failure_trigger` BY NAME (its `kind` and its `condition`
+    sentence), so an auditor reading the trail sees which pre-committed
+    condition fired, not merely that something did.
+    """
+    for firing in fired:
+        contingency = firing.contingency
+        trigger = contingency.failure_trigger
+        builder.edge(
+            "Trigger",
+            node("contingency", contingency.contingency_id),
+            node("plan", plan.plan_id),
+            "planner",
+            [
+                contingency.contingency_id,
+                contingency.plan_id,
+                trigger.subject,
+                plan.plan_id,
+            ],
+            (
+                f"{contingency.contingency_id} fired on failure_trigger "
+                f"'{trigger.kind}' — {trigger.condition}. Observed "
+                f"{trigger.observed_field}={firing.observed}, plan assumed "
+                f"{trigger.plan_assumed}. Pre-committed fallback "
+                f"{contingency.fallback_combination.label} was planned WITHOUT "
+                "a fresh solve."
+            ),
+        )
+        # What the fallback replaced — so the swap itself is auditable.
+        builder.edge(
+            "Invalidate",
+            node("contingency", contingency.contingency_id),
+            node("supplier", contingency.primary_action.supplier_id),
+            "planner",
+            [contingency.contingency_id, contingency.primary_action.supplier_id],
+            (
+                f"{contingency.primary_action.supplier_id} was committed "
+                f"{contingency.primary_action.qty} units at "
+                f"{contingency.primary_action.lead_time_days}-day lead time; "
+                f"{trigger.kind} invalidated that commitment. The primary was "
+                f"{contingency.primary_reversibility}, so it could still be "
+                "swapped."
+            ),
+        )
+
+
 def append_erp_write_edges(
     graph: ProvenanceGraph,
     plan: Plan,
@@ -932,6 +984,7 @@ def build_provenance_graph(
     plan: Optional[Plan] = None,
     brief: Optional[DecisionBrief] = None,
     erp_writes: Optional[list[ERPUpdateResponse]] = None,
+    fired_contingencies: Optional[list] = None,
     now: Optional[datetime] = None,
 ) -> ProvenanceGraph:
     """Build the graph from whichever stages actually ran. Every argument is
@@ -959,6 +1012,8 @@ def build_provenance_graph(
         _add_planner(builder, plan)
     if brief is not None:
         _add_ratchet(builder, brief, plan)
+    if plan is not None and fired_contingencies:
+        _add_contingencies(builder, plan, fired_contingencies)
     if plan is not None and erp_writes:
         _add_erp_writes(builder, plan, erp_writes)
 

@@ -476,31 +476,12 @@ def test_staleness_detection_is_a_state_diff_not_a_timer():
     Checked against the CODE, not the prose: the module docstring discusses
     intervals precisely to explain why there isn't one, so a naive substring
     search over the whole file flags its own explanation."""
-    import ast
+    from conftest import executable_source
 
-    source = open("app/engine/staleness.py", encoding="utf-8").read()
-    tree = ast.parse(source)
-
-    # Strip every docstring node, then unparse — leaving executable code only.
-    for scope in ast.walk(tree):
-        if not isinstance(
-            scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
-            continue
-        body = scope.body
-        if (
-            body
-            and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)
-        ):
-            scope.body = body[1:] or [ast.Pass()]
-
-    code = ast.unparse(ast.fix_missing_locations(tree)).lower()
-
+    code = executable_source("app/engine/staleness.py").lower()
     for banned in ("interval", "every_n", "max_age", "ttl", "expiry_seconds"):
         assert banned not in code, f"{banned!r} appears in executable code"
-    assert "quote_valid_hours" in source
+    assert "quote_valid_hours" in open("app/engine/staleness.py", encoding="utf-8").read()
 
 
 def test_staleness_findings_carry_the_real_before_and_after(store, escalating):
@@ -560,3 +541,100 @@ def test_both_llm_modes_produce_the_same_reentry(store, escalating, monkeypatch)
         f.kind for f in on.staleness.findings
     }
     assert off.post_replan_verified == on.post_replan_verified
+
+
+# ==========================================================================
+# FIX B — the cheap form of the VERIFY-idempotency guarantee
+# ==========================================================================
+# Item 8 works around VERIFY's non-idempotency by refusing to re-run it for
+# evidence that has not changed. That workaround is only sound if the
+# DETECTOR itself never re-reports evidence it already reported — otherwise
+# the same tracking read or claim could name VERIFY on two consecutive
+# cycles and drive two separate VERIFY re-entries, applying the reliability
+# penalty twice by a different route than the one item 8 closed.
+#
+# These assert that property directly, without reopening item 3.
+
+
+def test_the_same_tracking_read_cannot_trigger_two_verify_reentries(store, escalating):
+    """A tracking change fires ONCE. After the re-entry absorbs it, the new
+    snapshot records the new value, so the same read is no longer a
+    difference and cannot fire again."""
+    _first_plan(store)
+    store.tracking["PO-7712"].tracking_status = "in_transit"
+
+    second = run_pipeline(store, component_id="COMP-104", now=NOW)
+    assert second.reentered_at_stage == "MONITOR"
+    assert "tracking_status_changed" in {f.kind for f in second.staleness.findings}
+
+    # Nothing further changes. The identical tracking value must not be
+    # re-reported as a difference. The cached run IS returned unchanged —
+    # note it legitimately still carries the staleness report that created
+    # it, so `is second` (identity) is the property, not `staleness is None`.
+    reliability_after_reentry = store.suppliers["SUP-21"].reliability_score
+    third = run_pipeline(store, component_id="COMP-104", now=NOW)
+    fourth = run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    assert third is second, "the same tracking read fired a second re-entry"
+    assert fourth is second
+    assert store.suppliers["SUP-21"].reliability_score == reliability_after_reentry
+
+
+def test_the_same_claim_cannot_trigger_two_verify_reentries(store, escalating):
+    """The VERIFY-named case specifically: a new supplier claim fires once,
+    then stops being new."""
+    _first_plan(store)
+    store.send_supplier_message(
+        supplier_id="SUP-21",
+        to="supplier21@example.com",
+        subject="Further update on PO-7712",
+        body="PO-7712 has now been dispatched.",
+    )
+
+    second = run_pipeline(store, component_id="COMP-104", now=NOW)
+    assert second.reentered_at_stage == "VERIFY"
+
+    reliability_after_reentry = store.suppliers["SUP-21"].reliability_score
+    third = run_pipeline(store, component_id="COMP-104", now=NOW)
+    fourth = run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    assert third is second, "the same claim fired a second VERIFY re-entry"
+    assert fourth is second
+    # The point of the guarantee: no second VERIFY run means no second
+    # reliability penalty for one claim.
+    assert store.suppliers["SUP-21"].reliability_score == reliability_after_reentry
+
+
+def test_reliability_is_penalised_once_across_repeated_cycles(store, escalating):
+    """The property all of the above protects, stated end to end: however
+    many times the pipeline is re-invoked over unchanged evidence, SUP-21 is
+    downgraded exactly once for the one contradiction that exists."""
+    _first_plan(store)
+    after_first = store.suppliers["SUP-21"].reliability_score
+    assert after_first == 0.45  # one downgrade, correctly applied
+
+    for _ in range(4):
+        run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    assert store.suppliers["SUP-21"].reliability_score == after_first, (
+        "repeated pipeline invocations re-penalised SUP-21 for one contradiction"
+    )
+
+
+def test_detector_is_stable_when_called_repeatedly_on_one_snapshot(store):
+    """`detect_staleness` is a pure diff, so calling it N times on the same
+    snapshot must return N identical reports — no accumulation, no drift."""
+    plan = _first_plan(store).brief.chosen_plan
+    snapshot = _snapshot_for(store, plan)
+    store.tracking["PO-7712"].tracking_status = "in_transit"
+
+    reports = [
+        detect_staleness(
+            store, snapshot,
+            current_approval_threshold=config.TRACE_APPROVAL_THRESHOLD, now=NOW,
+        )
+        for _ in range(3)
+    ]
+    kinds = [sorted(f.kind for f in r.findings) for r in reports]
+    assert kinds[0] == kinds[1] == kinds[2]
+    assert len({r.reentry_stage for r in reports}) == 1

@@ -71,14 +71,13 @@ parts of that answer that are a judgement call rather than a given.
       test_repeated_cycles_on_an_unchanged_store_agree` currently ASSERTS the
       double application), so it was not done unilaterally. Say the word and
       it is a contained change to `verify.py` plus that one test.
-- [ ] **The staleness snapshot reads quotes from `store.rfq_log`, not from
-      `SolverResult`.** `SolverResult` does not retain the `RFQQuote` objects
-      the solve used, so `_latest_quote_expiry` takes the most recent quote
-      per (supplier, component) from the log — which IS the one the solve
-      used, because the snapshot is captured immediately after the solve. It
-      is correct but inferential. Adding `quotes_used: dict[str, RFQQuote]`
-      to `SolverResult` would make it direct; that touches shipped item-4
-      code, so it is flagged rather than done.
+
+## RESOLVED — staleness now cites the exact quotes the solve used
+
+- `SolverResult` now carries `quotes_used: dict[str, RFQQuote]`, and
+  `capture_preconditions(..., solver_result=...)` records quote expiries from
+  those exact quote objects. The previous inferential path — taking the latest
+  matching quote from `store.rfq_log` — is gone from staleness capture.
 
 ## RESOLVED — item 8's staleness trigger question
 

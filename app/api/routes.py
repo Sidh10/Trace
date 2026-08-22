@@ -102,6 +102,15 @@ from app.audit.provenance import (
     append_erp_write_edges,
     build_provenance_graph,
 )
+from app.engine.contingency import (
+    ContingencyPlan,
+    FiredContingency,
+    evaluate_contingencies,
+    fallback_solver_result,
+    register_contingencies,
+    reset_contingency_sequence,
+    to_staleness_report,
+)
 from app.engine.coverage import CoverageReport, compute_coverage
 from app.engine.monitor import MonitorReport, run_monitor_cycle
 from app.engine.planner import Plan, run_planner
@@ -174,6 +183,11 @@ class PipelineRun(BaseModel):
     post_replan_verified: Optional[bool] = None
     residual_staleness: Optional[StalenessReport] = None
 
+    # Item 9. `contingencies` is what was pre-committed for THIS plan;
+    # `fired_contingencies` is what fired to produce it.
+    contingencies: list[ContingencyPlan] = Field(default_factory=list)
+    fired_contingencies: list[FiredContingency] = Field(default_factory=list)
+
     def erp_write_count(self) -> int:
         return len(self.erp_writes)
 
@@ -194,6 +208,8 @@ class _StageOutputs(BaseModel):
     plan: Optional[Plan]
     brief: DecisionBrief
     snapshot: Optional[PreconditionSnapshot] = None
+    # Item 9: fallbacks pre-committed at PLAN time for this plan.
+    contingencies: list[ContingencyPlan] = Field(default_factory=list)
 
 
 # ==========================================================================
@@ -224,6 +240,7 @@ def reset_orchestrator_state() -> None:
     _RUNS_BY_COMPONENT.clear()
     _ERP_WRITES_BY_PLAN.clear()
     _OUTPUTS_BY_COMPONENT.clear()
+    reset_contingency_sequence()
     _run_seq = 0
 
 
@@ -452,6 +469,7 @@ def _finish(
     staleness: Optional[StalenessReport] = None,
     reentered_at_stage: Optional[str] = None,
     superseded_plan_id: Optional[str] = None,
+    fired_contingencies: Optional[list[FiredContingency]] = None,
 ) -> PipelineRun:
     """ERP WRITE (iff execute) then AUDIT, then cache the run and its stage
     outputs. Shared by the first pass and every re-entry so the boundary is
@@ -477,6 +495,7 @@ def _finish(
         plan=plan,
         brief=brief,
         erp_writes=erp_writes,
+        fired_contingencies=fired_contingencies or [],
         now=now,
     )
     stages.append("AUDIT")
@@ -488,7 +507,13 @@ def _finish(
             outputs.coverage,
             outputs.monitor,
             approval_threshold=_current_approval_threshold(),
+            solver_result=outputs.solver_result,
             now=now,
+        )
+        # Item 9: pre-commit the fallbacks NOW, at plan time. Registering
+        # them later would make them reactions, not contingencies.
+        outputs.contingencies = register_contingencies(
+            plan, outputs.solver_result, now=now
         )
 
     run = PipelineRun(
@@ -505,6 +530,8 @@ def _finish(
         staleness=staleness,
         reentered_at_stage=reentered_at_stage,
         superseded_plan_id=superseded_plan_id,
+        contingencies=outputs.contingencies,
+        fired_contingencies=fired_contingencies or [],
     )
     _RUNS_BY_COMPONENT[component_id] = run
     _OUTPUTS_BY_COMPONENT[component_id] = outputs
@@ -539,6 +566,20 @@ def run_pipeline(
     if cached is not None:
         if prior is None or prior.snapshot is None:
             return cached  # nothing to check against (no plan was produced)
+
+        # Item 9 is checked FIRST, and the order is deliberate. A fired
+        # contingency and generic staleness can both be true of the same
+        # change — a supplier's lead time rising is both "a supplier field
+        # moved" (SOLVER-level staleness, re-solve) and "the contingency we
+        # pre-committed for exactly this" (PLAN-level, use the fallback).
+        # The pre-commitment is the cheaper and more faithful answer: it
+        # spends no RFQ call and honours a decision already made and
+        # recorded. Falling through to a fresh solve would silently discard
+        # the contingency and make registering it pointless.
+        fired = evaluate_contingencies(store, prior.contingencies, now=now)
+        if fired:
+            return _reenter_on_contingency(store, component_id, cached, prior, fired, now)
+
         report = detect_staleness(
             store,
             prior.snapshot,
@@ -551,6 +592,115 @@ def run_pipeline(
 
     outputs, stages = _walk(store, component_id, now)
     return _finish(store, component_id, outputs, stages, now)
+
+
+def _reenter_on_contingency(
+    store: Store,
+    component_id: str,
+    stale_run: PipelineRun,
+    prior: _StageOutputs,
+    fired: list[FiredContingency],
+    now: datetime,
+) -> PipelineRun:
+    """Item 9's re-entry — item 8's machinery, landing on the fallback.
+
+    `to_staleness_report` renders the fired triggers as item 8's own
+    `StalenessReport` (reentry_stage=PLAN, stages_to_rerun=[PLAN, RATCHET]),
+    and `fallback_solver_result` hands `run_planner` a Pareto set containing
+    exactly the pre-committed fallback. So PLANNER is unmodified: the
+    fallback still passes the same deadline-feasibility filter, the same
+    allocation, the same reschedule logic. A contingency changes WHICH
+    combination is planned, never HOW.
+
+    SOLVER is skipped, which is the point — the alternative was already on
+    the Pareto set at plan time, so rediscovering it would spend RFQ calls
+    for an answer already known.
+    """
+    report = to_staleness_report(fired, now=now)
+    assert report is not None  # unreachable with a non-empty `fired`
+
+    stages = [
+        f"CONTINGENCY FIRED ({len(fired)}) — {report.reentry_note}",
+    ]
+    for firing in fired:
+        trigger = firing.contingency.failure_trigger
+        stages.append(
+            f"  trigger '{trigger.kind}' on {trigger.subject}: {firing.detail}"
+        )
+    if stale_run.erp_writes:
+        stages.append(
+            f"NOTE: {stale_run.plan_id} was already executed "
+            f"({len(stale_run.erp_writes)} irreversible write(s)). Rule 5 — the "
+            "primary is no longer compensable, so this SUPERSEDES rather than "
+            "substitutes; the POs it created stand."
+        )
+
+    outputs, walked = _walk(
+        store,
+        component_id,
+        now,
+        from_stage="PLAN",
+        stages_to_rerun=report.stages_to_rerun,
+        prior=_StageOutputs(
+            coverage=prior.coverage,
+            monitor=prior.monitor,
+            verification=prior.verification,
+            # The injected fallback-only Pareto set — this is what makes
+            # run_planner select the pre-committed alternative unchanged.
+            solver_result=fallback_solver_result(prior.solver_result, fired),
+            plan=prior.plan,
+            brief=prior.brief,
+        ),
+    )
+    stages.extend(walked)
+
+    # POST-REPLAN VERIFICATION — a fallback is not exempt. It was chosen
+    # earlier, which says nothing about whether it still holds now.
+    verified = True
+    residual: Optional[StalenessReport] = None
+    if outputs.plan is not None:
+        fresh = capture_preconditions(
+            store,
+            outputs.plan,
+            outputs.coverage,
+            outputs.monitor,
+            approval_threshold=_current_approval_threshold(),
+            solver_result=outputs.solver_result,
+            now=now,
+        )
+        residual = detect_staleness(
+            store,
+            fresh,
+            current_approval_threshold=_current_approval_threshold(),
+            now=now,
+        )
+        if residual.is_stale:
+            verified = False
+            stages.append(
+                "POST-REPLAN VERIFICATION FAILED — the pre-committed fallback "
+                f"does not hold either: {residual.reentry_note}"
+            )
+        else:
+            stages.append(
+                "POST-REPLAN VERIFICATION: the fallback's preconditions hold"
+            )
+            residual = None
+
+    run = _finish(
+        store,
+        component_id,
+        outputs,
+        stages,
+        now,
+        staleness=report,
+        reentered_at_stage=report.reentry_stage,
+        superseded_plan_id=stale_run.plan_id,
+        fired_contingencies=fired,
+    )
+    run.post_replan_verified = verified
+    run.residual_staleness = residual
+    _RUNS_BY_COMPONENT[component_id] = run
+    return run
 
 
 def _reenter(
@@ -612,6 +762,7 @@ def _reenter(
             outputs.coverage,
             outputs.monitor,
             approval_threshold=_current_approval_threshold(),
+            solver_result=outputs.solver_result,
             now=now,
         )
         residual = detect_staleness(

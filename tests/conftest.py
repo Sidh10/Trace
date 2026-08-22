@@ -103,3 +103,41 @@ def _llm_off_by_default(monkeypatch):
     them.
     """
     monkeypatch.setattr(config, "TRACE_LLM_ENABLED", False)
+
+
+# --------------------------------------------------------------------------
+# Shared helper for term-absence assertions
+# --------------------------------------------------------------------------
+# Three separate tests in this repo have asserted "term X does not appear in
+# module Y" and been tripped by the module's own docstring EXPLAINING why X
+# is absent — `mark_po_delayed`, `allocate_stock`, `interval`. Each was fixed
+# in place and the next one hit it again, so here is the shared version.
+#
+# Import it as `from conftest import executable_source` (pytest puts the
+# conftest directory on sys.path).
+
+
+def executable_source(path: str) -> str:
+    """Return `path`'s source with every docstring stripped.
+
+    Prose that explains why something is NOT done is documentation, not an
+    occurrence of the thing. Assert term-absence against this, not against
+    the raw file — otherwise a well-documented decision fails its own test.
+    """
+    import ast
+
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    for scope in ast.walk(tree):
+        if not isinstance(
+            scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            continue
+        body = scope.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            scope.body = body[1:] or [ast.Pass()]
+    return ast.unparse(ast.fix_missing_locations(tree))

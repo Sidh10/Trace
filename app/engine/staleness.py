@@ -105,7 +105,9 @@ from pydantic import BaseModel, Field
 from app.engine.coverage import CoverageReport
 from app.engine.monitor import MonitorReport
 from app.engine.planner import Plan
+from app.engine.solver import SolverResult
 from app.environment.clock import clock
+from app.environment.schemas import RFQQuote
 from app.environment.seed_data import Store
 
 PipelineStage = Literal["COVERAGE", "MONITOR", "VERIFY", "SOLVER", "PLAN", "RATCHET"]
@@ -202,22 +204,17 @@ class StalenessReport(BaseModel):
 # ==========================================================================
 
 
-def _latest_quote_expiry(store: Store, component_id: str, supplier_id: str):
-    """Expiry of the most recent quote this supplier issued for this
-    component: `quote_issued_at + quote_valid_hours` (§5.7's own fields).
+def _quote_expiry(quote: RFQQuote) -> datetime:
+    """`quote_issued_at + quote_valid_hours` — §5.7's own two fields, nothing
+    derived.
 
-    Read from `store.rfq_log` rather than from `SolverResult`, which does not
-    retain the `RFQQuote` objects it used. Captured immediately after the
-    solve, so the most recent quote per supplier IS the one the solve used.
+    Takes the quote itself. An earlier version reconstructed "the quote the
+    solve used" as "the most recent one in `store.rfq_log` for this
+    supplier/component", which was correct only because the snapshot ran
+    immediately after the solve — an inference resting on an unstated timing
+    assumption. `SolverResult.quotes_used` now carries the real objects, so
+    this cites rather than infers.
     """
-    quotes = [
-        q
-        for q in store.rfq_log
-        if q.supplier_id == supplier_id and q.component_id == component_id
-    ]
-    if not quotes:
-        return None
-    quote = quotes[-1]
     return quote.quote_issued_at + timedelta(hours=quote.quote_valid_hours)
 
 
@@ -228,10 +225,16 @@ def capture_preconditions(
     monitor: MonitorReport,
     *,
     approval_threshold: float,
+    solver_result: Optional[SolverResult] = None,
     now: Optional[datetime] = None,
 ) -> PreconditionSnapshot:
     """Snapshot what this plan rests on. Call immediately after the plan is
-    built, before anything else touches the store."""
+    built, before anything else touches the store.
+
+    `solver_result` supplies `quotes_used` — the actual quotes behind the
+    plan. Optional only so a caller holding just a plan can still snapshot
+    everything else; without it, quote expiry is simply not checked rather
+    than guessed at."""
     now = clock.now() if now is None else now
     component_id = plan.component_id
 
@@ -287,9 +290,9 @@ def capture_preconditions(
             "quality_score": supplier.quality_score,
             "certifications": sorted(supplier.certifications),
         }
-        expiry = _latest_quote_expiry(store, component_id, supplier_id)
-        if expiry is not None:
-            quote_expiries[supplier_id] = expiry
+        quote = (solver_result.quotes_used or {}).get(supplier_id) if solver_result else None
+        if quote is not None:
+            quote_expiries[supplier_id] = _quote_expiry(quote)
 
     return PreconditionSnapshot(
         plan_id=plan.plan_id,

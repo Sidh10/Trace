@@ -110,15 +110,15 @@ Everything above the cut-line works end to end before anything below it starts.
 | 7b | **Orchestrator** (`app/api/routes.py` + `app/main.py`) — items 1-7 assembled into one callable chain, `POST /agent/handle-event`; **owns the single ERP-write boundary** (rule 5) and the human-approval step `POST /agent/approval/{plan_id}` | enabler | ✅ built |
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
 | 8 | Staleness detector + earliest-conflict re-entry + post-replan verification (`app/engine/staleness.py`; re-entry executed by the orchestrator) | 10% | ✅ built |
-| 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | 1h |
+| 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | ✅ built |
 | 10 | Tool-call precondition logging + count-vs-necessity summary in audit trail | 10% | 45m |
 | 11 | **Judge-controlled disruption panel** (single HTML file) | demo | 1h |
 | 12 | Coverage board — days of coverage per production order, live | demo | 1.5h |
 | 13 | **Multi-baseline comparison harness** — see §11 below | demo | 3h |
 
-**Items 1–7 are ✅ COMPLETE — the cut-line is met.** This is a complete,
-scoring submission on its own. Items 8–13 are the difference between placing
-and winning.
+**Items 1–9 are ✅ COMPLETE — the cut-line is met, and the re-entry spine is
+now assembled through contingency fallback.** Items 10–13 are the remaining
+difference between placing and winning.
 
 **Parallelisation (3–4 people, own Claude accounts):**
 - **A** — item 1 (environment + clock), hand off early, help B/C, then 11/12

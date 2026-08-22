@@ -121,7 +121,7 @@ import itertools
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.environment.clock import clock
 from app.environment.schemas import (
@@ -241,6 +241,14 @@ class SolverResult(BaseModel):
     rejected: list[Rejection]
     quotes_requested: int
     quotes_reused: int
+    # The actual RFQQuote objects this solve used, keyed by supplier_id.
+    # Retained so downstream consumers CITE the quote rather than infer it:
+    # item 8's staleness snapshot previously re-derived "the quote the solve
+    # used" as "the most recent one in store.rfq_log for this
+    # supplier/component", which was correct only because the snapshot ran
+    # immediately after the solve. That is an inference with an unstated
+    # timing assumption; this is the quote itself.
+    quotes_used: dict[str, RFQQuote] = Field(default_factory=dict)
 
     def dropped_for(self, reason: DropReason) -> list[Rejection]:
         return [r for r in self.rejected if r.reason == reason]
@@ -729,4 +737,5 @@ def run_solver(
         rejected=rejected,
         quotes_requested=requested,
         quotes_reused=reused,
+        quotes_used=quotes,
     )
