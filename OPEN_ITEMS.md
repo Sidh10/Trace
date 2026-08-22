@@ -192,18 +192,42 @@ spec's own §17 metric, `baseline_total_cost`), never bare `None` at the
       allocation within the same two suppliers (e.g. balancing lead time
       instead of price), that's a new allocation rule, not a bug in this one.
 
-## Owed by whoever builds item 7
+## Owed by whoever builds item 10 (reads item 7's output)
 
-- [ ] **`ParsedClaim.model_version` is ready for `ProvenanceEdge.model_version`
-      — read it, don't recompute it.** `verify.py`'s `parse_claim` now sets
-      `model_version` to `app.llm.gemini_client.MODEL_VERSION` (the real
-      pinned string, e.g. `"gemini-3.6-flash"`) on a genuine LLM success, and
-      the literal `"deterministic"` on every other path — LLM disabled, or
-      the LLM call raised and fell through. That's exactly ARCHITECTURE.md
-      §7's `"gemini-<version> | deterministic"` format. When building
-      `ProvenanceEdge`, populate `model_version` from
-      `ClaimVerification.claim.model_version`; don't re-derive it from
-      `parsed_by` or hardcode the model string a second time.
+- [ ] **`ProvenanceGraph.tool_calls` is emitted and ready — it computes no
+      ratio on purpose.** `ToolCallSummary` totals only counters the upstream
+      reports already maintain (`MonitorReport.polls_made/polls_available`,
+      `VerificationReport.probes_made/probes_reused_from_monitor`,
+      `SolverResult.quotes_requested/quotes_reused`,
+      `DecisionBrief.approval_checks_made`), plus `total_calls_made`,
+      `calls_avoided_by_gating`, and a plain-language `notes` line per
+      module. **No efficiency ratio, percentage, or score is computed** —
+      that is item 10's call to make, and inventing one in item 7 would be a
+      metric this module has no mandate for (AGENTS.md rule 7). A test
+      asserts no field on `ToolCallSummary` contains "ratio"/"efficiency"/
+      "pct", so adding one is a deliberate act, not an accident.
+- [ ] Item 10's brief also mentions "tool-call **precondition** logging."
+      Item 7 records the COUNTS and the reason-per-module, but the
+      per-call precondition ("was this specific call actually needed at the
+      moment it was made") lives on the upstream decision records —
+      `PollDecision.reason` ("load_bearing" / "not_load_bearing"),
+      `VerificationSkip.reason`, `ClaimVerification.probe_source`. Those are
+      already populated; item 10 should read them rather than adding a
+      second logging path.
+
+## RESOLVED — item 7's model_version wiring
+
+- `ProvenanceEdge.model_version` reads `ClaimVerification.claim.model_version`
+  for VERIFY edges (item 3's real field, never re-derived from `parsed_by`,
+  never a hardcoded model string). One correction made while building it,
+  worth knowing: **RATCHET edges are tagged `"deterministic"`, NOT
+  `DecisionBrief.model_version`.** The brief's field describes its
+  *narration*, which may be LLM-rephrased; the decision itself comes from
+  `_evaluate_triggers`, pure Python an LLM cannot reach. Tagging a `Trigger`
+  edge with the narration's model version would assert in the audit trail
+  that an LLM produced the escalation decision — the exact claim AGENTS.md
+  rules 1 and 3 exist to make false. The narration's own provenance is kept
+  on `DecisionRecord.narration_model_version`, and a test asserts both.
 
 ## Owed by person A (seed tuning — do not fix in the engine)
 

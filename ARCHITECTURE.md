@@ -97,16 +97,16 @@ Everything above the cut-line works end to end before anything below it starts.
 
 | # | Component | Serves | Est. |
 |---:|---|---|---:|
-| 0 | **Task zero: Gemini function-call round trip** | blocking | 30m |
-| 1 | Simulated env: spec schemas verbatim, REST surface (§6), simulated clock | enabler | 3h |
+| 0 | **Task zero: Gemini function-call round trip** | blocking | ✅ passed |
+| 1 | Simulated env: spec schemas verbatim, REST surface (§6), simulated clock | enabler | ✅ built |
 | 2 | Coverage engine: **two metrics** — `days_of_coverage_on_hand` (usable ÷ daily usage) and `days_of_coverage` (+ dependable inbound). Thresholds are spec-field comparisons, never invented constants: `critical` = coverage < days_to_deadline; `at_risk` = projection dips below `safety_stock` before deadline. Plus ERP-vs-warehouse mismatch detection | 35% | ✅ built |
 | 2b | Gated polls on **load-bearing** POs — withdrawal alone turns some order critical. Broader than "thin-coverage POs" by design; the thin gate misses PO-7712 at Beat 1 | 35% + 10% | ✅ built |
-| 3 | Claim verification vs tracking; provenance-only reliability update, exponentially weighted `B(t+1) = (1−λ)B(t) + λs(t+1)`; probe only when a decision depends on the claim | 15% | 2h |
+| 3 | Claim verification vs tracking; provenance-only reliability update, exponentially weighted `B(t+1) = (1−λ)B(t) + λs(t+1)`; probe only when a decision depends on the claim | 15% | ✅ built |
 | 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | ✅ built |
 | 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** (not safety stock — that's 5b) | 35% | ✅ built |
 | 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | ✅ built |
 | 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | ✅ built |
-| 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | 2h |
+| 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | ✅ built |
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
 | 8 | Staleness detector + earliest-conflict re-entry + post-replan verification | 10% | 2h |
 | 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | 1h |
@@ -115,8 +115,9 @@ Everything above the cut-line works end to end before anything below it starts.
 | 12 | Coverage board — days of coverage per production order, live | demo | 1.5h |
 | 13 | **Multi-baseline comparison harness** — see §11 below | demo | 3h |
 
-Items 1–7 are a complete, scoring submission on their own. Items 8–13 are the
-difference between placing and winning.
+**Items 1–7 are ✅ COMPLETE — the cut-line is met.** This is a complete,
+scoring submission on its own. Items 8–13 are the difference between placing
+and winning.
 
 **Parallelisation (3–4 people, own Claude accounts):**
 - **A** — item 1 (environment + clock), hand off early, help B/C, then 11/12
@@ -265,17 +266,79 @@ the rejected option would have cost MORE (rejecting it saved money);
 **negative** means it would have cost LESS (a real regret, not a saving —
 SUP-18 above was cheaper, so rejecting it, correctly, cost something).
 
-**ProvenanceEdge** — one entry in the audit graph (§4, item 7)
+**ProvenanceEdge** — one entry in the audit graph (§4, item 7). Built;
+real shape below, from `app/audit/provenance.py`. `from`/`to` are
+serialization aliases (`from` is a Python keyword — same pattern as
+`schemas.py`'s `SupplierMessage.from_`).
 ```json
 {
-  "edge_id": "PROV-0001",
+  "edge_id": "PROV-0009",
   "relation": "Support | Depend-on | Contradict | Invalidate | Trigger | Update",
   "from": "tracking:PO-7712",
-  "to": "claim:SUP-21-dispatched",
+  "to": "claim:MSG-0016",
+  "produced_by_module": "coverage | monitor | verify | solver | planner | ratchet",
+  "input_record_ids": ["PO-7712", "MSG-0016", "SUP-21"],
   "model_version": "gemini-<version> | deterministic",
-  "timestamp": "<sim-clock timestamp>"
+  "timestamp": "<sim-clock timestamp>",
+  "note": "claim was 'dispatched', but tracking status is 'label_created_no_pickup' — the shipment has not moved."
 }
 ```
+
+**There is no severity, weight, or confidence field on an edge, and there
+must never be one.** An edge exists or it doesn't (AGENTS.md rule 7 — a
+"0.7-strength Support edge" is an invented metric displayed as a finding).
+What an edge carries instead is where it came from: the module, the actual
+record IDs consumed, and `model_version`.
+
+`model_version` is read off the records, never chosen by the graph builder.
+VERIFY edges carry `ClaimVerification.claim.model_version` (item 3's real
+field — the one that legitimately reads `gemini-<version>`). **RATCHET edges
+are always `"deterministic"`, NOT `DecisionBrief.model_version`** — the brief's
+field describes its *narration*, which may be LLM-rephrased, while the
+decision itself comes from `_evaluate_triggers`, pure Python an LLM cannot
+reach (rules 1 and 3). Tagging a `Trigger` edge with the narration's model
+version would assert in the audit trail that an LLM produced the escalation.
+The narration's provenance is recorded separately on
+`DecisionRecord.narration_model_version`.
+
+**ProvenanceGraph** — item 7's ONE object: the audit trail and the
+assumption ledger together, per §4 ("as ONE object"), plus the per-decision
+reproducibility log and tool-call accounting.
+```json
+{
+  "built_at": "<sim-clock timestamp>",
+  "edges": ["<ProvenanceEdge>, ..."],
+  "assumptions": [
+    {"assumption_id": "ASSUM-0004", "subject_node": "brief:PLAN-0001",
+     "statement": "<verbatim from source_field>", "source_module": "ratchet",
+     "source_field": "DecisionBrief.falsification_line",
+     "model_version": "deterministic", "timestamp": "<sim-clock timestamp>"}
+  ],
+  "decisions": [
+    {"decision_id": "DEC-0004", "decision_node": "brief:PLAN-0001", "module": "ratchet",
+     "outcome": "execute", "input_record_ids": ["PLAN-0001", "COMP-104"],
+     "model_version": "deterministic", "narration_model_version": "gemini-<version>",
+     "timestamp": "<sim-clock timestamp>"}
+  ],
+  "regret_ledger": ["<planner's own RejectedAlternative objects, by reference>"],
+  "cost_of_inaction": "<planner's own CostOfInaction object, by reference>",
+  "tool_calls": {
+    "monitor_polls_made": 2, "monitor_polls_available": 15,
+    "verify_probes_made": 0, "verify_probes_reused_from_monitor": 1,
+    "solver_quotes_requested": 3, "solver_quotes_reused": 0,
+    "ratchet_approval_checks_made": 1,
+    "total_calls_made": 6, "calls_avoided_by_gating": 14,
+    "notes": ["<one plain-language line per module>"]
+  }
+}
+```
+`regret_ledger` and `cost_of_inaction` hold PLANNER's **own instances**, not
+restatements of their figures — `graph.regret_ledger[i] is
+plan.rejected_alternatives[i]`, asserted by test. Nothing in the graph reads
+`saved` or `cost_increase_vs_baseline_pct` and writes a second copy, so a
+discrepancy between the graph and the plan is structurally impossible rather
+than merely unlikely. `tool_calls` deliberately computes no ratio or
+efficiency score — item 10 owns that.
 
 **ReliabilityRecord** — VERIFY's persistent memory per supplier
 ```json
