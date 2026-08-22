@@ -205,3 +205,130 @@ def get_clock() -> dict:
 def advance_clock(hours: float = 0.0, days: float = 0.0) -> dict:
     new_time = clock.advance(hours=hours, days=days)
     return {"now": new_time.isoformat()}
+
+
+# --------------------------------------------------------------------------
+# Disruption Injection & Simulator Reset — Items 11/12 (Judge Panel)
+# --------------------------------------------------------------------------
+
+
+@router.post("/environment/reset")
+def reset_environment() -> dict:
+    """Reset the simulated environment to a clean initial state (build_store())
+    and clear the orchestrator's state and caches."""
+    from datetime import datetime, timezone
+    from app import config
+    config.TRACE_APPROVAL_THRESHOLD = 150000.0
+    seed_data.STATE = seed_data.build_store()
+    from app.api.routes import reset_orchestrator_state
+    reset_orchestrator_state()
+    return {"status": "reset", "message": "Environment reset to clean initial state."}
+
+
+@router.post("/environment/inject/{scenario_name}")
+def inject_scenario(scenario_name: str) -> dict:
+    """Inject a hidden-test disruption scenario into the simulated environment.
+    Reuses exact setup logic from test_coverage, test_verify, test_solver,
+    test_staleness, test_contingency."""
+    from datetime import timedelta
+    store = seed_data.STATE
+
+    if scenario_name == "supplier_delay":
+        store.send_supplier_message(
+            supplier_id="SUP-21",
+            to="supplier21@example.com",
+            subject="Status check on PO-7712",
+            body="Any update on PO-7712?",
+        )
+        if "PO-7712" in store.purchase_orders:
+            store.purchase_orders["PO-7712"].status = "delayed"
+        return {
+            "scenario": "supplier_delay",
+            "target_component": "COMP-104",
+            "target_po": "PO-7712",
+            "detail": "PO-7712 marked delayed after tracking contradiction; SUP-21 message logged.",
+        }
+
+    elif scenario_name == "quality_fail":
+        if "SUP-18" in store.suppliers:
+            store.suppliers["SUP-18"].quality_score = 0.71
+        if "COMP-104" in store.inventory:
+            store.inventory["COMP-104"].required_quality_score = 0.85
+        return {
+            "scenario": "quality_fail",
+            "target_component": "COMP-104",
+            "detail": "SUP-18 quality_score set to 0.71 (below COMP-104 required threshold 0.85). Hard filter drops SUP-18 before RFQ.",
+        }
+
+    elif scenario_name == "insufficient_qty":
+        if "SUP-42" in store.suppliers:
+            store.suppliers["SUP-42"].available_quantity = 600
+        return {
+            "scenario": "insufficient_qty",
+            "target_component": "COMP-104",
+            "detail": "SUP-42 available_quantity capped at 600 (short of COMP-104 950-unit demand). Multi-supplier split required.",
+        }
+
+    elif scenario_name == "low_reliability_fastest":
+        if "SUP-21" in store.suppliers:
+            store.suppliers["SUP-21"].reliability_score = 0.45
+        return {
+            "scenario": "low_reliability_fastest",
+            "target_component": "COMP-104",
+            "detail": "SUP-21 reliability score downgraded to 0.45 after contradiction. Solver outranks lead time in favor of reliable split.",
+        }
+
+    elif scenario_name == "exceeds_approval":
+        from app import config
+        config.TRACE_APPROVAL_THRESHOLD = 50000.0
+        return {
+            "scenario": "exceeds_approval",
+            "target_component": "COMP-104",
+            "detail": "Approval threshold lowered to ₹50,000 (below plan total cost ₹123,674). Ratchet verdict forced to escalate.",
+        }
+
+    elif scenario_name == "stale_erp":
+        if "COMP-104" in store.inventory:
+            store.inventory["COMP-104"].current_stock = 450
+            store.inventory["COMP-104"].usable_stock = 390
+        if "PO-7712" in store.purchase_orders:
+            store.purchase_orders["PO-7712"].status = "delayed"
+        return {
+            "scenario": "stale_erp",
+            "target_component": "COMP-104",
+            "detail": "ERP overstates stock (450 current vs 390 warehouse usable). PO-7712 delayed, raising decision-changing inventory contradiction.",
+        }
+
+    elif scenario_name == "demand_spike":
+        prod = store.production_orders.get("PROD-882")
+        if prod is not None:
+            prod.units_planned = 1400
+        return {
+            "scenario": "demand_spike",
+            "target_component": "COMP-104",
+            "detail": "PROD-882 demand spiked from 700 to 1400 units. Coverage breached, re-entry triggered.",
+        }
+
+    elif scenario_name == "expedite_unavailable":
+        if "SUP-42" in store.suppliers:
+            store.suppliers["SUP-42"].lead_time_days = 8
+        return {
+            "scenario": "expedite_unavailable",
+            "target_component": "COMP-104",
+            "detail": "SUP-42 lead_time_days increased from 4 to 8. Pre-committed contingency failure_trigger fires fallback plan.",
+        }
+
+    elif scenario_name == "priority_change":
+        prod = store.production_orders.get("PROD-914")
+        if prod is not None:
+            prod.priority = "high"
+            prod.deadline = (clock.now() + timedelta(days=3)).date()
+        return {
+            "scenario": "priority_change",
+            "target_component": "COMP-104",
+            "detail": "PROD-914 priority elevated to high with 3-day deadline. Production reschedule required.",
+        }
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario_name: {scenario_name}")
+

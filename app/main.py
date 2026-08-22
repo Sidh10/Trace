@@ -21,6 +21,7 @@ Items 8-13 mount here as they land.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import config  # noqa: F401 — importing loads .env before anything else needs it
@@ -34,6 +35,12 @@ app.include_router(api_router, tags=["agent"])
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 
+@app.get("/")
+def read_root() -> FileResponse:
+    return FileResponse("static/index.html")
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "llm_enabled": config.TRACE_LLM_ENABLED}
+

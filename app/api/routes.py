@@ -94,13 +94,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.audit.provenance import (
     ProvenanceGraph,
     append_erp_write_edges,
     build_provenance_graph,
+)
+from app.engine.baseline import (
+    BaselineComparisonReport,
+    PipelineVariant,
+    run_baseline_comparison,
 )
 from app.engine.tool_audit import build_tool_audit
 from app.engine.contingency import (
@@ -363,6 +368,7 @@ def _walk(
     from_stage: PipelineStage = "COVERAGE",
     stages_to_rerun: Optional[list[PipelineStage]] = None,
     prior: Optional[_StageOutputs] = None,
+    variant: PipelineVariant = "trace",
 ) -> tuple[_StageOutputs, list[str]]:
     """Run the chain from `from_stage` onward, reusing `prior` for everything
     earlier — and for any stage the rollback rule says to SKIP.
@@ -404,9 +410,19 @@ def _walk(
         reuse("MONITOR", "MONITOR")
 
     # VERIFY — same gate, reusing MONITOR's tracking read. NON-IDEMPOTENT:
-    # it applies the exponentially weighted reliability update, so re-running
-    # it for unchanged evidence would penalise a supplier twice.
-    if should_run("VERIFY") or prior is None:
+    # it applies the exponentially weighted reliability update.
+    # SKIPPED under cheapest_always and claim_ablation variants.
+    if variant in ("cheapest_always", "claim_ablation"):
+        verification = VerificationReport(
+            verified_at=now,
+            verifications=[],
+            skipped=[],
+            reliability_changes=[],
+            probes_made=0,
+            probes_reused_from_monitor=0,
+        )
+        walked.append("VERIFY (skipped by variant config)")
+    elif should_run("VERIFY") or prior is None:
         verification = run_verification_cycle(
             store, coverage=coverage, monitor=monitor, now=now
         )
@@ -424,17 +440,35 @@ def _walk(
     if should_run("SOLVER") or prior is None:
         quantity_needed = sum(r.component_required for r in coverage_results)
         solver_result = run_solver(
-            store, component_id=component_id, quantity_needed=quantity_needed, now=now
+            store,
+            component_id=component_id,
+            quantity_needed=quantity_needed,
+            now=now,
+            min_price_only=(variant == "cheapest_always"),
+            skip_quality_filter=(variant == "cheapest_always"),
         )
-        walked.append("HARD FILTER + SOLVER")
+        if variant == "cheapest_always":
+            walked.append("SOLVER (cheapest-always: min price, no quality filter)")
+        else:
+            walked.append("HARD FILTER + SOLVER")
     else:
         solver_result = prior.solver_result
         reuse("SOLVER", "HARD FILTER + SOLVER")
 
     # PLAN — may be None when nothing survived; run_ratchet handles that.
     if should_run("PLAN") or prior is None:
-        plan = run_planner(store, component_id, solver_result, coverage_results, now=now)
-        walked.append("PLAN")
+        plan = run_planner(
+            store,
+            component_id,
+            solver_result,
+            coverage_results,
+            now=now,
+            allow_reschedule=(variant != "cheapest_always"),
+        )
+        if variant == "cheapest_always":
+            walked.append("PLAN (cheapest-always: no production reschedule)")
+        else:
+            walked.append("PLAN")
     else:
         plan = prior.plan
         reuse("PLAN", "PLAN")
@@ -471,6 +505,7 @@ def _finish(
     reentered_at_stage: Optional[str] = None,
     superseded_plan_id: Optional[str] = None,
     fired_contingencies: Optional[list[FiredContingency]] = None,
+    variant: PipelineVariant = "trace",
 ) -> PipelineRun:
     """ERP WRITE (iff execute) then AUDIT, then cache the run and its stage
     outputs. Shared by the first pass and every re-entry so the boundary is
@@ -545,8 +580,14 @@ def _finish(
         contingencies=outputs.contingencies,
         fired_contingencies=fired_contingencies or [],
     )
-    _RUNS_BY_COMPONENT[component_id] = run
-    _OUTPUTS_BY_COMPONENT[component_id] = outputs
+    cache_key = component_id if variant == "trace" else f"{component_id}:{variant}"
+    _RUNS_BY_COMPONENT[cache_key] = run
+    _OUTPUTS_BY_COMPONENT[cache_key] = outputs
+    # Also index by component_id if no default run exists yet
+    if component_id not in _RUNS_BY_COMPONENT:
+        _RUNS_BY_COMPONENT[component_id] = run
+        _OUTPUTS_BY_COMPONENT[component_id] = outputs
+
     return run
 
 
@@ -555,6 +596,7 @@ def run_pipeline(
     *,
     component_id: str,
     now: Optional[datetime] = None,
+    variant: PipelineVariant = "trace",
 ) -> PipelineRun:
     """Walk the chain for one component and return the run.
 
@@ -572,12 +614,17 @@ def run_pipeline(
     store = _store() if store is None else store
     now = clock.now() if now is None else now
 
-    cached = _RUNS_BY_COMPONENT.get(component_id)
-    prior = _OUTPUTS_BY_COMPONENT.get(component_id)
+    cache_key = component_id if variant == "trace" else f"{component_id}:{variant}"
+    cached = _RUNS_BY_COMPONENT.get(cache_key)
+    prior = _OUTPUTS_BY_COMPONENT.get(cache_key)
 
     if cached is not None:
         if prior is None or prior.snapshot is None:
             return cached  # nothing to check against (no plan was produced)
+
+        if variant in ("static_workflow", "cheapest_always", "retry_only"):
+            # Fixed stage sequence: staleness detector (item 8) and contingency re-entry (item 9) disabled
+            return cached
 
         # Item 9 is checked FIRST, and the order is deliberate. A fired
         # contingency and generic staleness can both be true of the same
@@ -602,8 +649,8 @@ def run_pipeline(
             return cached
         return _reenter(store, component_id, cached, prior, report, now)
 
-    outputs, stages = _walk(store, component_id, now)
-    return _finish(store, component_id, outputs, stages, now)
+    outputs, stages = _walk(store, component_id, now, variant=variant)
+    return _finish(store, component_id, outputs, stages, now, variant=variant)
 
 
 def _reenter_on_contingency(
@@ -953,3 +1000,22 @@ def reset_agent() -> dict:
     `build_store()`'s job."""
     reset_orchestrator_state()
     return {"status": "reset"}
+
+
+# ==========================================================================
+# Item 13 — Multi-baseline comparison harness (ARCHITECTURE.md §11)
+# ==========================================================================
+
+
+@router.post("/baseline/compare/{scenario_name}", response_model=BaselineComparisonReport)
+@router.post("/baseline/compare", response_model=BaselineComparisonReport)
+def compare_baselines(
+    scenario_name: str = "po_7712_delay",
+    component_id: Optional[str] = Query(default="COMP-104"),
+) -> BaselineComparisonReport:
+    """Run all four pipeline variants (plus bonus claim_ablation) against a
+    disruption scenario and return their outcomes, spend, hidden tests, and
+    silent failures together.
+    """
+    comp_id = component_id or "COMP-104"
+    return run_baseline_comparison(scenario_name=scenario_name, component_id=comp_id)

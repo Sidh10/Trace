@@ -497,6 +497,33 @@ def test_environment_and_orchestrator_share_one_store(client, store):
     )
 
 
+def test_environment_reset_endpoint(client):
+    res = client.post("/environment/reset")
+    assert res.status_code == 200
+    assert res.json()["status"] == "reset"
+
+
+def test_environment_scenario_injection_endpoints(client):
+    scenarios = [
+        "supplier_delay",
+        "quality_fail",
+        "insufficient_qty",
+        "low_reliability_fastest",
+        "exceeds_approval",
+        "stale_erp",
+        "demand_spike",
+        "expedite_unavailable",
+        "priority_change",
+    ]
+    for s in scenarios:
+        res = client.post(f"/environment/inject/{s}")
+        assert res.status_code == 200, f"Scenario {s} failed with {res.status_code}"
+        assert res.json()["scenario"] == s
+        client.post("/environment/reset")
+
+
+
+
 # ==========================================================================
 # The orchestrator holds no decision logic
 # ==========================================================================

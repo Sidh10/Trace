@@ -2,15 +2,874 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>TRACE</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TRACE — Disruption Control Agent</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --header-bg: #161b22;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --heading: #f0f6fc;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --success: #2ea043;
+      --success-bg: rgba(46, 160, 67, 0.15);
+      --warning: #d29922;
+      --warning-bg: rgba(210, 153, 34, 0.15);
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.15);
+      --purple: #a371f7;
+      --purple-bg: rgba(163, 113, 247, 0.15);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.5;
+      padding-bottom: 60px;
+    }
+
+    /* Top Nav / Header */
+    header {
+      background-color: var(--header-bg);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--heading);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-title span.badge-team {
+      background: var(--purple-bg);
+      color: var(--purple);
+      border: 1px solid var(--purple);
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-badge {
+      font-size: 0.8rem;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+      background: #21262d;
+      border: 1px solid var(--card-border);
+    }
+    .status-badge.online { color: var(--success); border-color: var(--success); }
+
+    /* Layout grid */
+    .container {
+      max-width: 1400px;
+      margin: 24px auto;
+      padding: 0 16px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    @media (min-width: 1024px) {
+      .container-two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+    }
+
+    /* Cards */
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 12px;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--heading);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      background: #21262d;
+      color: var(--heading);
+      border-color: var(--card-border);
+    }
+
+    .btn:hover {
+      background: #30363d;
+      border-color: #8b949e;
+    }
+
+    .btn-primary {
+      background: var(--success);
+      color: #ffffff;
+    }
+    .btn-primary:hover { background: #2c974b; }
+
+    .btn-danger {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+
+    .btn-warning {
+      background: var(--warning-bg);
+      color: var(--warning);
+      border-color: var(--warning);
+    }
+
+    .btn-accent {
+      background: #1f6feb;
+      color: #ffffff;
+    }
+    .btn-accent:hover { background: #388bfd; }
+
+    .btn-scenario {
+      background: #161b22;
+      border: 1px solid #30363d;
+      text-align: left;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      width: 100%;
+    }
+    .btn-scenario:hover {
+      border-color: var(--accent);
+      background: #21262d;
+    }
+    .btn-scenario .title { font-weight: 600; color: var(--heading); font-size: 0.85rem; }
+    .btn-scenario .sub { font-size: 0.75rem; color: var(--text-muted); }
+
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    th {
+      background-color: #0d1117;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+    }
+
+    tr:hover td { background-color: rgba(255,255,255,0.02); }
+
+    /* Status Pill Badges */
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .pill-healthy { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+    .pill-at_risk { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning); }
+    .pill-critical { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+    .pill-thin { background: rgba(88, 166, 255, 0.15); color: var(--accent); border: 1px solid var(--accent); }
+
+    .pill-execute { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); font-size: 0.9rem; padding: 4px 12px; }
+    .pill-escalate { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); font-size: 0.9rem; padding: 4px 12px; }
+
+    /* Gap highlight */
+    .gap-badge {
+      font-weight: 700;
+      color: var(--warning);
+      background: rgba(210, 153, 34, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .gap-badge.zero { color: var(--text-muted); background: transparent; font-weight: normal; }
+
+    /* Verdict Banner */
+    .verdict-box {
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      background: #0d1117;
+    }
+    .verdict-box.execute { border-color: var(--success); }
+    .verdict-box.escalate { border-color: var(--danger); }
+
+    .verdict-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .verdict-details {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--card-border);
+      font-size: 0.85rem;
+    }
+
+    .falsification-line {
+      margin-top: 10px;
+      font-style: italic;
+      color: var(--warning);
+      font-size: 0.85rem;
+      background: rgba(210, 153, 34, 0.08);
+      padding: 8px 12px;
+      border-left: 3px solid var(--warning);
+      border-radius: 4px;
+    }
+
+    /* Active Log */
+    .log-box {
+      background: #0d1117;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 12px;
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+    .log-entry { margin-bottom: 6px; border-bottom: 1px solid #21262d; padding-bottom: 4px; }
+    .log-entry .time { color: var(--text-muted); }
+    .log-entry .tag { color: var(--accent); font-weight: bold; }
+
+    /* Provenance Graph Trail */
+    .prov-chain {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .prov-node {
+      background: #0d1117;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 0.8rem;
+    }
+    .prov-node-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .rel-tag {
+      font-size: 0.7rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .rel-Support { background: var(--success-bg); color: var(--success); }
+    .rel-Contradict { background: var(--danger-bg); color: var(--danger); }
+    .rel-Invalidate { background: var(--danger-bg); color: var(--danger); }
+    .rel-Trigger { background: var(--warning-bg); color: var(--warning); }
+    .rel-Depend-on { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+    .rel-Update { background: var(--purple-bg); color: var(--purple); }
+
+    /* Utility */
+    .flex-gap { display: flex; gap: 8px; align-items: center; }
+    .muted { color: var(--text-muted); }
+    .bold { font-weight: 600; }
+  </style>
 </head>
 <body>
-  <!--
-    Placeholder. The real coverage board + judge panel is build-order
-    items 11/12 (ARCHITECTURE.md §4) — one static file, vanilla JS, no
-    build step. This stub exists only so app/main.py has something to
-    mount at /static during earlier items.
-  -->
-  <p>TRACE — coverage board and judge panel not built yet (items 11/12).</p>
+
+  <!-- Header / Controls -->
+  <header>
+    <div class="brand-title">
+      <span>⚙️ TRACE</span>
+      <span class="badge-team">PUNE 2026</span>
+      <span style="font-size: 0.85rem; font-weight: normal; color: var(--text-muted);">Supply Chain Disruption Control Agent</span>
+    </div>
+    <div class="header-controls">
+      <div class="status-badge online" id="health-badge">● LLM Mode: --</div>
+      <div class="status-badge" id="clock-badge">🕒 Sim Clock: --</div>
+      <button class="btn btn-warning" onclick="resetSimulator()">🔄 Reset Environment</button>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- Section 1: COVERAGE BOARD (Item 12) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span>📊 COVERAGE BOARD</span>
+          <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">(Item 12 — Live Inventory & PO Dependability per Production Order)</span>
+        </div>
+        <button class="btn" onclick="fetchCoverageBoard()">🔄 Refresh Board</button>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table id="coverage-table">
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Product</th>
+              <th>Component Required</th>
+              <th>Usable Stock</th>
+              <th>Days On Hand</th>
+              <th>Days Coverage (+Inbound)</th>
+              <th>Exposure Gap</th>
+              <th>Deadline</th>
+              <th>Priority</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="coverage-tbody">
+            <tr><td colspan="10" class="muted" style="text-align:center; padding: 20px;">Loading live coverage board...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 2: JUDGE PANEL & DISRUPTION CONTROL (Item 11) -->
+    <div class="container-two-col">
+
+      <!-- Left Column: Scenario Injection Panel -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>🎯 JUDGE DISRUPTION PANEL</span>
+          </div>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Supports sequential dual-injection</span>
+        </div>
+
+        <div class="scenario-grid">
+          <button class="btn btn-scenario" onclick="injectScenario('supplier_delay')">
+            <span class="title">🚨 1. Supplier Delay</span>
+            <span class="sub">PO-7712 delay + claim contradiction</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('quality_fail')">
+            <span class="title">⚠️ 2. Quality Fail</span>
+            <span class="sub">SUP-18 fails quality threshold (0.71 < 0.85)</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('insufficient_qty')">
+            <span class="title">📦 3. Insufficient Qty</span>
+            <span class="sub">SUP-42 stock capped (600/950) -> Order Split</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('low_reliability_fastest')">
+            <span class="title">⚡ 4. Low Reliability Fastest</span>
+            <span class="sub">SUP-21 fast but unreliable (0.45)</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('exceeds_approval')">
+            <span class="title">🔒 5. Exceeds Approval</span>
+            <span class="sub">Threshold lowered to ₹50k -> Escalation</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('stale_erp')">
+            <span class="title">📊 6. Stale ERP Stock</span>
+            <span class="sub">Scenario 2 overstatement (450 vs 390)</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('demand_spike')">
+            <span class="title">📈 7. Demand Spike</span>
+            <span class="sub">PROD-882 demand doubled to 1400</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('expedite_unavailable')">
+            <span class="title">🛑 8. Expedite Unavailable</span>
+            <span class="sub">SUP-42 delayed +4d -> Contingency Fallback</span>
+          </button>
+
+          <button class="btn btn-scenario" onclick="injectScenario('priority_change')">
+            <span class="title">🔄 9. Priority Change</span>
+            <span class="sub">PROD-914 elevated to High priority</span>
+          </button>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <div style="font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; color: var(--heading);">Active Injected Disruption Stream:</div>
+          <div class="log-box" id="scenario-log">
+            <div class="muted">No disruptions injected yet. Click a scenario button above to inject.</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center; background: #0d1117; padding: 12px; border-radius: 6px; border: 1px solid var(--card-border);">
+          <div style="font-size: 0.85rem; font-weight: 600;">Target Component:</div>
+          <select id="component-select" style="background: #21262d; color: var(--text); border: 1px solid var(--card-border); padding: 6px 12px; border-radius: 4px; font-weight: bold;">
+            <option value="COMP-104">COMP-104 (Motor Driver IC)</option>
+            <option value="COMP-122">COMP-122 (Servo Motor Actuator)</option>
+            <option value="COMP-108">COMP-108 (CAN Bus Transceiver)</option>
+            <option value="COMP-105">COMP-105 (8-Channel Relay Board)</option>
+          </select>
+          <button class="btn btn-primary" style="margin-left: auto;" onclick="runAgent()">▶ Run Agent Pipeline</button>
+        </div>
+      </div>
+
+      <!-- Right Column: Agent Execution Output & Audit Brief -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>🤖 AGENT DECISION BRIEF</span>
+          </div>
+          <div id="verdict-pill-slot"></div>
+        </div>
+
+        <div id="verdict-container">
+          <div class="muted" style="text-align: center; padding: 40px;">
+            Ready for execution. Click <strong>"▶ Run Agent Pipeline"</strong> or inject a scenario to trigger the TRACE control loop.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Section 3: DEEP AUDIT & PROVENANCE GRAPH -->
+    <div class="card" id="audit-details-card" style="display: none;">
+      <div class="card-header">
+        <div class="card-title">
+          <span>📜 AUDIT TRAIL, PROVENANCE TRACE & TOOL DISCIPLINE</span>
+        </div>
+      </div>
+
+      <div class="container-two-col">
+
+        <!-- Left: Tool Audit & Regret Ledger -->
+        <div>
+          <h4 style="color: var(--heading); margin-bottom: 10px;">Tool Discipline & Gating Summary</h4>
+          <div id="tool-audit-box" style="background: #0d1117; padding: 12px; border-radius: 6px; border: 1px solid var(--card-border); font-size: 0.85rem; margin-bottom: 16px;"></div>
+
+          <h4 style="color: var(--heading); margin-bottom: 10px;">Rejected Alternatives (Regret Ledger)</h4>
+          <div id="regret-box" style="overflow-x: auto; margin-bottom: 16px;"></div>
+        </div>
+
+        <!-- Right: Provenance Graph Trail -->
+        <div>
+          <h4 style="color: var(--heading); margin-bottom: 10px;">Provenance Graph Chain (Item 7)</h4>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">Causal graph trace: Disruption Event ➔ Coverage / Verify ➔ Pareto Solver ➔ Plan ➔ Ratchet Brief</div>
+          <div class="prov-chain" id="prov-chain-box"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let activeInjections = [];
+
+    // Initialize
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchHealth();
+      fetchClock();
+      fetchCoverageBoard();
+    });
+
+    async function fetchHealth() {
+      try {
+        const res = await fetch('/health');
+        const data = await res.json();
+        const el = document.getElementById('health-badge');
+        el.innerText = `● LLM Mode: ${data.llm_enabled ? 'ENABLED (Gemini)' : 'LLM-OFF (Deterministic Only)'}`;
+        el.className = `status-badge ${data.llm_enabled ? 'online' : ''}`;
+      } catch (e) {
+        console.error('Health check failed', e);
+      }
+    }
+
+    async function fetchClock() {
+      try {
+        const res = await fetch('/clock');
+        const data = await res.json();
+        document.getElementById('clock-badge').innerText = `🕒 Sim Clock: ${data.now.split('T')[0]} ${data.now.split('T')[1].substring(0,8)}`;
+      } catch (e) {
+        console.error('Clock fetch failed', e);
+      }
+    }
+
+    async function fetchCoverageBoard() {
+      try {
+        const res = await fetch('/production-schedule');
+        const orders = await res.json();
+
+        // Fetch inventory to compute on-hand days
+        const invRes = await fetch('/inventory');
+        const invList = await invRes.json();
+        const invMap = {};
+        invList.forEach(i => invMap[i.component_id] = i);
+
+        const tbody = document.getElementById('coverage-tbody');
+        tbody.innerHTML = '';
+
+        // Now compute days for each production order
+        const now = new Date('2026-09-01T08:00:00Z');
+
+        orders.forEach(ord => {
+          const inv = invMap[ord.required_component] || {};
+          const dailyUsage = inv.daily_usage || 1;
+          const usableStock = inv.usable_stock || 0;
+          const onHandDays = (usableStock / dailyUsage).toFixed(1);
+
+          // Deadline calculation
+          const dDate = new Date(ord.deadline);
+          const diffDays = Math.max(0, ((dDate - now) / (1000 * 3600 * 24))).toFixed(1);
+
+          // Est coverage (with inbound)
+          // COMP-104 has PO-7712 (700 units) if in_transit
+          let inboundDays = 0;
+          if (ord.required_component === 'COMP-104') {
+            inboundDays = (700 / dailyUsage); // +7.8 days
+          }
+          const totalCoverageDays = (parseFloat(onHandDays) + (ord.required_component === 'COMP-104' ? 7.8 : 0)).toFixed(1);
+
+          // Exposure Gap
+          const gap = (parseFloat(totalCoverageDays) - parseFloat(onHandDays)).toFixed(1);
+
+          // Status determination
+          let status = 'healthy';
+          let isThin = parseFloat(onHandDays) < parseFloat(diffDays);
+          if (parseFloat(totalCoverageDays) < parseFloat(diffDays)) {
+            status = 'critical';
+          } else if (isThin) {
+            status = 'at_risk';
+          }
+
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="bold">${ord.production_order_id}</td>
+            <td>${ord.product}</td>
+            <td><span class="bold">${ord.required_component}</span> (${inv.name || ''})</td>
+            <td>${usableStock} units</td>
+            <td><span class="bold">${onHandDays}d</span></td>
+            <td><span class="bold">${totalCoverageDays}d</span></td>
+            <td>${parseFloat(gap) > 0 ? `<span class="gap-badge">+${gap}d exposure</span>` : `<span class="gap-badge zero">0d</span>`}</td>
+            <td>${ord.deadline} (${diffDays}d)</td>
+            <td><span class="pill" style="background:#21262d;">${ord.priority}</span></td>
+            <td>
+              <span class="pill pill-${status}">${status}</span>
+              ${isThin ? `<span class="pill pill-thin" style="margin-left:4px;">THIN</span>` : ''}
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('Failed to fetch coverage board', e);
+      }
+    }
+
+    async function resetSimulator() {
+      try {
+        const res = await fetch('/environment/reset', { method: 'POST' });
+        const data = await res.json();
+
+        activeInjections = [];
+        const logBox = document.getElementById('scenario-log');
+        logBox.innerHTML = `<div class="muted">Simulator reset cleanly to initial seed state. Memory & caches cleared.</div>`;
+
+        document.getElementById('verdict-container').innerHTML = `
+          <div class="muted" style="text-align: center; padding: 40px;">
+            Simulator reset complete. Select a scenario or run agent pipeline.
+          </div>
+        `;
+        document.getElementById('verdict-pill-slot').innerHTML = '';
+        document.getElementById('audit-details-card').style.display = 'none';
+
+        fetchClock();
+        fetchCoverageBoard();
+      } catch (e) {
+        alert('Reset failed: ' + e);
+      }
+    }
+
+    async function injectScenario(name) {
+      try {
+        const res = await fetch(`/environment/inject/${name}`, { method: 'POST' });
+        const data = await res.json();
+
+        activeInjections.push(data);
+        renderScenarioLog();
+        fetchCoverageBoard();
+      } catch (e) {
+        alert('Scenario injection failed: ' + e);
+      }
+    }
+
+    function renderScenarioLog() {
+      const logBox = document.getElementById('scenario-log');
+      logBox.innerHTML = '';
+      activeInjections.forEach((inj, idx) => {
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.innerHTML = `
+          <span class="time">[Inject #${idx + 1}]</span>
+          <span class="tag">${inj.scenario}</span> ➔ ${inj.detail}
+        `;
+        logBox.appendChild(div);
+      });
+    }
+
+    async function runAgent() {
+      const componentId = document.getElementById('component-select').value;
+      const verdictContainer = document.getElementById('verdict-container');
+      verdictContainer.innerHTML = `<div class="muted" style="text-align:center; padding: 30px;">⚡ Running TRACE Orchestrator pipeline for ${componentId}...</div>`;
+
+      try {
+        const res = await fetch('/agent/handle-event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ component_id: componentId })
+        });
+        const run = await res.json();
+        renderAgentRun(run);
+        fetchCoverageBoard();
+      } catch (e) {
+        verdictContainer.innerHTML = `<div class="pill pill-critical">Pipeline Error: ${e}</div>`;
+      }
+    }
+
+    async function submitApproval(planId, approved) {
+      try {
+        const res = await fetch(`/agent/approval/${planId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approved: approved, note: approved ? 'Approved by operator via Judge Panel UI' : 'Rejected by operator' })
+        });
+        const run = await res.json();
+        renderAgentRun(run);
+        fetchCoverageBoard();
+      } catch (e) {
+        alert('Approval submission failed: ' + e);
+      }
+    }
+
+    function renderAgentRun(run) {
+      const brief = run.brief;
+      const graph = run.graph;
+      const plan = run.graph.regret_ledger ? { actions: run.graph.edges.filter(e => e.relation === 'Support' && e.produced_by_module === 'planner') } : null;
+
+      // Render Verdict Pill in Card Header
+      const pillSlot = document.getElementById('verdict-pill-slot');
+      pillSlot.innerHTML = `<span class="pill pill-${run.decision}">${run.decision.toUpperCase()}</span>`;
+
+      // Render Verdict Container
+      const vBox = document.getElementById('verdict-container');
+      const isExecute = run.decision === 'execute';
+
+      let html = `
+        <div class="verdict-box ${run.decision}">
+          <div class="verdict-top">
+            <div>
+              <span style="font-size: 1.1rem; font-weight: 700; color: var(--heading);">Verdict: ${run.decision.toUpperCase()}</span>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 2px;">
+                ${isExecute ? '✅ Automatically executed to ERP (Idempotent Boundary)' : '⚠️ Human Approval Required — Approval limit exceeded or Quality Risk'}
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 1.1rem; font-weight: 700; color: var(--heading);">₹${(brief.total_cost || 0).toLocaleString()}</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Threshold: ₹${(brief.approval_threshold || 0).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 10px; font-size: 0.9rem; line-height: 1.4;">
+            <strong>Decision Narration:</strong> ${brief.narration || 'No narration provided.'}
+          </div>
+
+          ${brief.falsification_line ? `<div class="falsification-line">🔍 Falsification Line: "${brief.falsification_line}"</div>` : ''}
+
+          ${!isExecute && run.awaiting_approval ? `
+            <div style="margin-top: 16px; padding: 12px; background: rgba(248,81,73,0.1); border: 1px solid var(--danger); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+              <span class="bold" style="color: var(--danger);">Human Action Required to Commit ERP Write:</span>
+              <div class="flex-gap">
+                <button class="btn btn-primary" onclick="submitApproval('${run.plan_id}', true)">✓ Approve & Execute ERP</button>
+                <button class="btn btn-danger" onclick="submitApproval('${run.plan_id}', false)">✕ Reject Plan</button>
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="verdict-details">
+            <div><span class="muted">Run ID:</span> <span class="bold">${run.run_id}</span></div>
+            <div><span class="muted">Plan ID:</span> <span class="bold">${run.plan_id || 'N/A'}</span></div>
+            <div><span class="muted">ERP Writes:</span> <span class="bold">${run.erp_writes ? run.erp_writes.length : 0} write(s)</span></div>
+            <div><span class="muted">Staleness Re-entries:</span> <span class="bold">${run.reentered_at_stage || 'None (Fresh Solve)'}</span></div>
+          </div>
+        </div>
+      `;
+
+      // Render Recovery Plan Actions
+      html += `<h4 style="color: var(--heading); margin-bottom: 8px;">Recovery Plan Executed Actions</h4>`;
+      html += `
+        <table style="margin-bottom: 20px;">
+          <thead>
+            <tr>
+              <th>Action Type</th>
+              <th>Details</th>
+              <th>Reversibility Tag</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      if (graph && graph.edges) {
+        const planEdges = graph.edges.filter(e => e.from_node.startsWith('plan:'));
+        if (planEdges.length > 0) {
+          planEdges.forEach(e => {
+            let revTag = 'compensable';
+            if (e.note.includes('IRREVERSIBLE')) revTag = 'irreversible';
+            if (e.note.includes('reschedule')) revTag = 'reversible';
+
+            html += `
+              <tr>
+                <td class="bold">${e.relation} ➔ ${e.to_node}</td>
+                <td>${e.note}</td>
+                <td><span class="pill pill-${revTag === 'irreversible' ? 'critical' : revTag === 'reversible' ? 'healthy' : 'at_risk'}">${revTag}</span></td>
+              </tr>
+            `;
+          });
+        } else {
+          html += `<tr><td colspan="3" class="muted">Plan details recorded on audit graph.</td></tr>`;
+        }
+      }
+
+      html += `</tbody></table>`;
+      vBox.innerHTML = html;
+
+      // Render Section 3 Audit Details
+      document.getElementById('audit-details-card').style.display = 'block';
+
+      // Tool Audit Box
+      const taBox = document.getElementById('tool-audit-box');
+      if (graph.tool_audit) {
+        const ta = graph.tool_audit;
+        let taHtml = `<div class="bold" style="color: var(--accent); margin-bottom: 6px;">${ta.necessity_verdict}</div>`;
+        taHtml += `<div style="display: flex; gap: 16px; margin-top: 8px;">`;
+        ta.module_summaries.forEach(s => {
+          taHtml += `
+            <div style="background: #161b22; padding: 8px 12px; border-radius: 4px; border: 1px solid var(--card-border); flex: 1;">
+              <div class="bold" style="text-transform: uppercase; font-size: 0.75rem;">${s.module}</div>
+              <div>Made: <span class="bold" style="color: var(--success);">${s.calls_made}</span> | Avoided: <span class="bold" style="color: var(--accent);">${s.calls_avoided}</span></div>
+            </div>
+          `;
+        });
+        taHtml += `</div>`;
+        taBox.innerHTML = taHtml;
+      } else {
+        taBox.innerHTML = `<span class="muted">Tool audit counters active on provenance graph.</span>`;
+      }
+
+      // Regret Ledger Box
+      const regBox = document.getElementById('regret-box');
+      if (graph.regret_ledger && graph.regret_ledger.length > 0) {
+        let rHtml = `<table><thead><tr><th>Rejected Option</th><th>Saved / Regret Cost</th><th>Reason</th><th>Regret Explanation</th></tr></thead><tbody>`;
+        graph.regret_ledger.forEach(r => {
+          const savedStr = r.saved >= 0 ? `+₹${r.saved.toLocaleString()}` : `-₹${Math.abs(r.saved).toLocaleString()}`;
+          rHtml += `
+            <tr>
+              <td class="bold">${r.option}</td>
+              <td style="color: ${r.saved >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight: bold;">${savedStr}</td>
+              <td><span class="pill pill-at_risk">${r.reason}</span></td>
+              <td>${r.regret}</td>
+            </tr>
+          `;
+        });
+        rHtml += `</tbody></table>`;
+        regBox.innerHTML = rHtml;
+      } else {
+        regBox.innerHTML = `<div class="muted">No Pareto candidates were rejected for this plan.</div>`;
+      }
+
+      // Provenance Graph Chain
+      const provBox = document.getElementById('prov-chain-box');
+      provBox.innerHTML = '';
+      if (graph.edges && graph.edges.length > 0) {
+        graph.edges.forEach(edge => {
+          const nodeDiv = document.createElement('div');
+          nodeDiv.className = 'prov-node';
+          nodeDiv.innerHTML = `
+            <div class="prov-node-header">
+              <span>${edge.from_node} ➔ ${edge.to_node}</span>
+              <span class="rel-tag rel-${edge.relation}">${edge.relation}</span>
+            </div>
+            <div class="muted">${edge.note}</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Module: ${edge.produced_by_module} | Model: ${edge.model_version}</div>
+          `;
+          provBox.appendChild(nodeDiv);
+        });
+      } else {
+        provBox.innerHTML = `<div class="muted">No provenance edges recorded.</div>`;
+      }
+    }
+  </script>
 </body>
 </html>

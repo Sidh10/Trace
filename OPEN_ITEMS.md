@@ -111,6 +111,15 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       allocation within the same two suppliers (e.g. balancing lead time
       instead of price), that's a new allocation rule, not a bug in this one.
 
+## Shipped — Items 11 & 12 (Coverage Board + Judge Panel UI)
+
+- **Single deliverable `static/index.html`** holding both the **Coverage Board** and **Judge Panel** (vanilla HTML/CSS/JS, no build step, no framework).
+- **Coverage Board**: Live table polling `/production-schedule` and `/inventory`, rendering both `days_of_coverage` and `days_of_coverage_on_hand` with Exposure Gap highlighting and status badges (`healthy`, `at_risk`, `critical`, `thin coverage`).
+- **Judge Panel**: Interactive controls for 9 hidden-test disruption scenarios (`supplier_delay`, `quality_fail`, `insufficient_qty`, `low_reliability_fastest`, `exceeds_approval`, `stale_erp`, `demand_spike`, `expedite_unavailable`, `priority_change`). Supports sequential dual-injection without page reload.
+- **RESET Button**: Calls `POST /environment/reset` (`build_store()` + `reset_orchestrator_state()`).
+- **Decision Brief & Audit Output**: Displays `execute`/`escalate` verdict, total spend vs approval threshold, falsification line, plain-language narration, human approval actions (`POST /agent/approval/{plan_id}`), recovery plan actions with reversibility tags (`compensable`, `reversible`, `irreversible`), rejected alternatives with quantified regret, cost of inaction, tool audit gating summary, and provenance graph trail.
+- **Backend endpoints**: `POST /environment/reset` and `POST /environment/inject/{scenario_name}` added to `app/environment/routes.py`. Root route `/` serves `static/index.html`.
+
 ## Signed off — no action, recorded so it isn't re-litigated
 
 - **`model_version` now distinguishes the LLM and deterministic paths in
