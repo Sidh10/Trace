@@ -91,13 +91,17 @@ sequencing.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.audit.provenance import ProvenanceGraph, build_provenance_graph
+from app.audit.provenance import (
+    ProvenanceGraph,
+    append_erp_write_edges,
+    build_provenance_graph,
+)
 from app.engine.coverage import compute_coverage
 from app.engine.monitor import run_monitor_cycle
 from app.engine.planner import Plan, run_planner
@@ -197,40 +201,77 @@ def _store() -> Store:
 # ==========================================================================
 
 
-def _write_erp_once(store: Store, plan: Plan, trigger: str) -> list[ERPUpdateResponse]:
+def _write_erp_once(
+    store: Store, plan: Plan, trigger: str, *, now: Optional[datetime] = None
+) -> list[ERPUpdateResponse]:
     """AGENTS.md rule 5's one irreversible action, behind its one guard.
 
     Idempotent per `plan_id`: a plan already written returns its existing
-    response(s) untouched. This is what makes a double approval, or an
-    approval arriving after an execute, produce one write rather than two.
+    responses untouched. This is what makes a double approval, or an approval
+    arriving after an execute, produce one write SET rather than two.
 
-    The action is `store_plan` (§5.9) — recording the decided plan. It is
-    deliberately the ONLY action emitted: translating each `purchase_split`
-    into a `create_alternate_po` would require the orchestrator to choose an
-    `expected_delivery`, a PO id, and an approval ceiling per split, which is
-    plan-shaped logic this module is explicitly not allowed to hold. Logged
-    in OPEN_ITEMS.md as needing sign-off, not decided unilaterally here.
+    Two actions are emitted, in this order (§5.9):
+
+      1. `store_plan` — the decision record, written FIRST so that if PO
+         creation were to fail partway, the ERP still shows what was
+         intended.
+      2. one `create_alternate_po` per `purchase_split` action — the actual
+         procurement. Signed off; previously withheld pending that.
+
+    `expected_delivery` is the sim clock's current time plus THAT supplier's
+    own `lead_time_days`, both already on the `PurchaseSplitAction`. No
+    approval ceiling is passed: RATCHET already authorised the plan's total
+    cost, so a per-PO ceiling would be a second, redundant gate on a decision
+    already made (the schema's own default stands).
+
+    **PO ids are not generated here.** Omitting `po_id` from the payload
+    hands generation to `Store.update_erp`'s existing anchor-safe range
+    (item 1) — the same code path that already guarantees no collision with
+    a reserved anchor id. Hand-rolling a range here is exactly the bug class
+    ARCHITECTURE.md §8 records as already hit and fixed once.
     """
     existing = _ERP_WRITES_BY_PLAN.get(plan.plan_id)
     if existing is not None:
         return existing
 
-    response = store.update_erp(
-        ERPUpdateRequest(
-            action="store_plan",
-            production_order_id=None,
-            payload={
-                "plan_id": plan.plan_id,
-                "component_id": plan.component_id,
-                "total_cost": plan.total_cost,
-                "chosen_combination": plan.chosen_combination.label,
-                "deadline_feasible": plan.deadline_feasible,
-                "actions": [a.model_dump(mode="json") for a in plan.actions],
-                "written_because": trigger,
-            },
+    now = clock.now() if now is None else now
+    writes: list[ERPUpdateResponse] = [
+        store.update_erp(
+            ERPUpdateRequest(
+                action="store_plan",
+                production_order_id=None,
+                payload={
+                    "plan_id": plan.plan_id,
+                    "component_id": plan.component_id,
+                    "total_cost": plan.total_cost,
+                    "chosen_combination": plan.chosen_combination.label,
+                    "deadline_feasible": plan.deadline_feasible,
+                    "actions": [a.model_dump(mode="json") for a in plan.actions],
+                    "written_because": trigger,
+                },
+            )
         )
-    )
-    writes = [response]
+    ]
+
+    for split in plan.purchase_actions():
+        writes.append(
+            store.update_erp(
+                ERPUpdateRequest(
+                    action="create_alternate_po",
+                    payload={
+                        # No "po_id" — Store generates it, anchor-safe.
+                        "component_id": plan.component_id,
+                        "supplier_id": split.supplier_id,
+                        "quantity": split.qty,
+                        "unit_price": split.unit_price,
+                        "expected_delivery": (
+                            now + timedelta(days=split.lead_time_days)
+                        ).date().isoformat(),
+                    },
+                )
+            )
+        )
+
     _ERP_WRITES_BY_PLAN[plan.plan_id] = writes
     return writes
 
@@ -296,7 +337,9 @@ def run_pipeline(
     erp_writes: list[ERPUpdateResponse] = []
     awaiting_approval = False
     if brief.decision == "execute" and plan is not None:
-        erp_writes = _write_erp_once(store, plan, trigger="ratchet_verdict_execute")
+        erp_writes = _write_erp_once(
+            store, plan, trigger="ratchet_verdict_execute", now=now
+        )
         stages.append("ERP WRITE")
     else:
         awaiting_approval = True
@@ -310,6 +353,7 @@ def run_pipeline(
         solver_result=solver_result,
         plan=plan,
         brief=brief,
+        erp_writes=erp_writes,
         now=now,
     )
     stages.append("AUDIT")
@@ -361,6 +405,10 @@ def resolve_approval(
         run.erp_writes = _write_erp_once(
             store, run.brief.chosen_plan, trigger=f"human_approval_by:{approved_by}"
         )
+        # The write happened after this run's graph was built, so the trail
+        # gets the edges that only became true now. Appending is idempotent
+        # and leaves every earlier edge untouched.
+        append_erp_write_edges(run.graph, run.brief.chosen_plan, run.erp_writes)
         run.approval_outcome = "approved"
     else:
         # No write, by construction — the rejection is recorded on the run,

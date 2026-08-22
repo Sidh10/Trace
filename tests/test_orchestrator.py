@@ -50,6 +50,17 @@ _ELICIT_CLAIM = {
     "body": "Any update on PO-7712?",
 }
 
+# One EXECUTE writes a SET, not a single row: `store_plan` (the decision
+# record) plus one `create_alternate_po` per purchase_split. The COMP-104
+# plan splits across SUP-37 and SUP-42, so 1 + 2 = 3.
+#
+# The invariant these tests defend is NOT "exactly one row in the ERP log" —
+# it is "exactly one write SET per plan_id, however the write is reached".
+# Asserting a literal 1 would now fail for the right behaviour AND pass for a
+# wrong one (a plan whose splits silently vanished).
+_EXPECTED_SPLITS = 2
+_EXPECTED_WRITES_PER_EXECUTED_PLAN = 1 + _EXPECTED_SPLITS
+
 
 @pytest.fixture
 def store():
@@ -104,9 +115,12 @@ def test_erp_write_fires_when_the_verdict_is_execute(store):
     run = run_pipeline(store, component_id="COMP-104", now=NOW)
 
     assert run.decision == "execute"
-    assert len(run.erp_writes) == 1
-    assert len(store.erp_log) == 1
-    assert run.erp_writes[0].action == "store_plan"
+    assert len(run.erp_writes) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
+    assert run.erp_writes[0].action == "store_plan"  # decision record first
+    assert [w.action for w in run.erp_writes[1:]] == (
+        ["create_alternate_po"] * _EXPECTED_SPLITS
+    )
     assert run.awaiting_approval is False
 
 
@@ -153,10 +167,17 @@ def test_firing_the_same_disruption_twice_produces_exactly_one_erp_write(store):
 
     assert first.plan_id == second.plan_id
     assert first.run_id == second.run_id
-    assert len(store.erp_log) == 1, f"expected exactly 1 ERP write, got {len(store.erp_log)}"
-    assert len(first.erp_writes) == 1
-    assert len(second.erp_writes) == 1
-    assert first.erp_writes[0].update_id == second.erp_writes[0].update_id
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN, (
+        f"expected one write SET ({_EXPECTED_WRITES_PER_EXECUTED_PLAN} rows), "
+        f"got {len(store.erp_log)} — the second run wrote again"
+    )
+    assert [w.update_id for w in first.erp_writes] == [
+        w.update_id for w in second.erp_writes
+    ]
+    # Exactly one PO per split — not two POs per split.
+    created = [w for w in store.erp_log if w.action == "create_alternate_po"]
+    assert len(created) == _EXPECTED_SPLITS
+    assert len({w.resulting_state["po_id"] for w in created}) == _EXPECTED_SPLITS
 
 
 def test_approving_twice_produces_exactly_one_erp_write(store, monkeypatch):
@@ -168,20 +189,20 @@ def test_approving_twice_produces_exactly_one_erp_write(store, monkeypatch):
     first = resolve_approval(store, plan_id=run.plan_id, approved=True)
     second = resolve_approval(store, plan_id=run.plan_id, approved=True)
 
-    assert len(store.erp_log) == 1
-    assert len(first.erp_writes) == 1
-    assert len(second.erp_writes) == 1
-    assert first.erp_writes[0].update_id == second.erp_writes[0].update_id
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
+    assert [w.update_id for w in first.erp_writes] == [
+        w.update_id for w in second.erp_writes
+    ]
 
 
 def test_approval_after_an_execute_does_not_write_a_second_time(store):
     """The two paths into the write must share one guard, not two."""
     _elicit_claim(store)
     run = run_pipeline(store, component_id="COMP-104", now=NOW)
-    assert len(store.erp_log) == 1
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
 
     resolve_approval(store, plan_id=run.plan_id, approved=True)
-    assert len(store.erp_log) == 1
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
 
 
 def test_rejection_closes_the_plan_with_no_write_and_is_logged(store, monkeypatch):
@@ -225,9 +246,33 @@ def test_the_orchestrator_is_the_only_caller_of_erp_update():
     )
 
 
-def test_there_is_exactly_one_erp_write_call_site_in_the_orchestrator():
-    source = open("app/api/routes.py", encoding="utf-8").read()
-    assert source.count("store.update_erp(") == 1
+def test_every_erp_write_call_site_is_inside_the_one_guarded_function():
+    """`_write_erp_once` now emits several actions (store_plan + one
+    create_alternate_po per split), so counting call sites is no longer the
+    invariant. What must hold is that every one of them sits INSIDE the
+    single guarded function — nothing else in the orchestrator may write."""
+    import ast
+
+    tree = ast.parse(open("app/api/routes.py", encoding="utf-8").read())
+
+    guarded, unguarded = 0, []
+    for func in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+        calls = [
+            n
+            for n in ast.walk(func)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "update_erp"
+        ]
+        if not calls:
+            continue
+        if func.name == "_write_erp_once":
+            guarded += len(calls)
+        else:
+            unguarded.append(func.name)
+
+    assert guarded >= 1
+    assert unguarded == [], f"unguarded ERP writes in: {unguarded}"
 
 
 # ==========================================================================
@@ -306,7 +351,7 @@ def test_http_handle_event_walks_the_full_pipeline(client, store):
 
     assert body["component_id"] == "COMP-104"
     assert body["decision"] == "execute"
-    assert len(body["erp_writes"]) == 1
+    assert len(body["erp_writes"]) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
     assert body["graph"]["edges"]
     assert body["brief"]["falsification_line"]
 
@@ -344,7 +389,22 @@ def test_http_graph_is_identical_to_the_direct_call_graph(client, store):
     )
     direct_edges = [(e.relation, e.from_node, e.to_node) for e in graph.edges]
 
-    assert http_edges == direct_edges
+    # The direct chain above performs no ERP write — it is engine calls only,
+    # and the write is the orchestrator's own responsibility. So the HTTP
+    # graph legitimately carries edges the direct one cannot: one per row the
+    # orchestrator wrote. The honest assertion is therefore not "the two are
+    # equal" but "the engine-derived edges are identical, and the ONLY thing
+    # the orchestrator added is the ERP write trail" — which is a stronger
+    # claim than equality, because it pins down exactly what the extra edges
+    # are rather than just tolerating a difference.
+    erp_node_prefixes = ("po:PO-9", "erp_write:")
+    http_engine_edges = [
+        e for e in http_edges if not e[2].startswith(erp_node_prefixes)
+    ]
+    http_erp_edges = [e for e in http_edges if e[2].startswith(erp_node_prefixes)]
+
+    assert http_engine_edges == direct_edges
+    assert len(http_erp_edges) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
     assert http_body["decision"] == brief.decision
     assert http_body["plan_id"] == plan.plan_id
 
@@ -362,12 +422,12 @@ def test_http_escalate_then_approve_writes_exactly_once(client, store, monkeypat
     plan_id = body["plan_id"]
     first = client.post(f"/agent/approval/{plan_id}", json={"approved": True})
     assert first.status_code == 200
-    assert len(first.json()["erp_writes"]) == 1
+    assert len(first.json()["erp_writes"]) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
 
     second = client.post(f"/agent/approval/{plan_id}", json={"approved": True})
     assert second.status_code == 200
-    assert len(second.json()["erp_writes"]) == 1
-    assert len(store.erp_log) == 1
+    assert len(second.json()["erp_writes"]) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
 
 
 def test_http_rejection_writes_nothing(client, store, monkeypatch):
@@ -533,7 +593,7 @@ def test_pipeline_decision_is_identical_in_both_llm_modes(store, monkeypatch):
 def test_reset_clears_the_run_cache_and_write_registry(store):
     _elicit_claim(store)
     first = run_pipeline(store, component_id="COMP-104", now=NOW)
-    assert len(store.erp_log) == 1
+    assert len(store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
 
     reset_orchestrator_state()
     clock.reset()
@@ -546,7 +606,8 @@ def test_reset_clears_the_run_cache_and_write_registry(store):
     _elicit_claim(fresh_store)
     second = run_pipeline(fresh_store, component_id="COMP-104", now=NOW)
 
-    assert len(fresh_store.erp_log) == 1  # a genuinely new run writes again
+    # A genuinely new run writes again — fresh store, fresh write set.
+    assert len(fresh_store.erp_log) == _EXPECTED_WRITES_PER_EXECUTED_PLAN
     assert second.run_id == first.run_id  # sequence reset too
 
 
@@ -557,3 +618,151 @@ def test_http_reset_endpoint(client, store):
 
     assert client.post("/agent/reset").status_code == 200
     assert client.get("/agent/runs/COMP-104").status_code == 404
+
+
+# ==========================================================================
+# create_alternate_po per split (signed off) — the execute path's real
+# procurement, not just a decision record
+# ==========================================================================
+
+
+def test_execute_creates_exactly_one_po_per_split_with_correct_fields(store):
+    """Two splits -> exactly two create_alternate_po actions, each carrying
+    that split's own supplier, quantity, price, and an expected_delivery of
+    sim-clock-now + THAT supplier's lead_time_days."""
+    from datetime import timedelta
+
+    _elicit_claim(store)
+    run = run_pipeline(store, component_id="COMP-104", now=NOW)
+    assert run.decision == "execute"
+
+    splits = run.brief.chosen_plan.purchase_actions()
+    assert len(splits) == _EXPECTED_SPLITS
+
+    created = [w for w in store.erp_log if w.action == "create_alternate_po"]
+    assert len(created) == _EXPECTED_SPLITS
+
+    by_supplier = {w.resulting_state["supplier_id"]: w.resulting_state for w in created}
+    for split in splits:
+        state = by_supplier[split.supplier_id]
+        assert state["quantity"] == split.qty
+        assert state["unit_price"] == split.unit_price
+        assert state["component_id"] == "COMP-104"
+        # sim-clock now + this supplier's own lead time, not a shared date
+        expected = (NOW + timedelta(days=split.lead_time_days)).date().isoformat()
+        assert state["expected_delivery"] == expected
+
+    # The two suppliers have different lead times, so the dates must differ —
+    # proof the per-split lead time was used rather than one blanket value.
+    assert len({s["expected_delivery"] for s in by_supplier.values()}) == _EXPECTED_SPLITS
+
+
+def test_created_po_ids_never_collide_with_a_reserved_anchor(store):
+    """ARCHITECTURE.md §8's standing invariant. PO ids are generated by
+    `Store.update_erp`'s existing anchor-safe range (item 1) — this module
+    passes no `po_id`, so the range is reused rather than hand-rolled, which
+    is the bug class §8 records as already hit once."""
+    from app.environment.seed_data import _RESERVED_ANCHOR_IDS
+
+    _elicit_claim(store)
+    run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    created = {
+        w.resulting_state["po_id"]
+        for w in store.erp_log
+        if w.action == "create_alternate_po"
+    }
+    assert created
+    assert not (created & _RESERVED_ANCHOR_IDS["po_id"])
+    # And they are real, retrievable POs, not just log rows.
+    for po_id in created:
+        assert store.get_purchase_order(po_id) is not None
+
+
+def test_the_orchestrator_does_not_hand_roll_po_ids():
+    """Structural: no `po_id` in the create_alternate_po payload, and no
+    id-range arithmetic anywhere in this module."""
+    source = open("app/api/routes.py", encoding="utf-8").read()
+    assert '"po_id":' not in source
+    assert "9000 +" not in source
+    assert "PO-" not in source.split('"""')[-1]  # no PO id literal in code
+
+
+def test_no_approval_ceiling_is_passed_per_po(store):
+    """RATCHET already authorised the plan's total cost; a per-PO ceiling
+    would be a second, redundant gate on a decision already made."""
+    source = open("app/api/routes.py", encoding="utf-8").read()
+    assert "approval_required_above" not in source
+
+
+def test_provenance_cites_every_created_po(store):
+    """The audit trail must show not just what was decided but what was
+    actually written — the one thing that cannot be taken back."""
+    _elicit_claim(store)
+    run = run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    created = [
+        w.resulting_state["po_id"]
+        for w in store.erp_log
+        if w.action == "create_alternate_po"
+    ]
+    for po_id in created:
+        edges = [
+            e for e in run.graph.edges
+            if e.relation == "Trigger" and e.to_node == node("po", po_id)
+        ]
+        assert len(edges) == 1, f"{po_id} not cited exactly once in the trail"
+        assert edges[0].from_node == node("plan", run.plan_id)
+        assert "IRREVERSIBLE" in edges[0].note
+
+    # The store_plan row is cited too, so the write set is complete.
+    assert any(e.to_node.startswith("erp_write:") for e in run.graph.edges)
+    assert run.graph.unknown_node_kinds() == []
+    assert run.graph.duplicate_edges() == []
+
+
+def test_provenance_gains_the_po_edges_on_approval_not_before(store, monkeypatch):
+    """An escalated plan's graph is built BEFORE the write. When approval
+    later performs it, the trail must gain those edges — otherwise the audit
+    trail of an approved plan silently omits the POs it created."""
+    _force_escalate(monkeypatch)
+    _elicit_claim(store)
+    run = run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    assert not [e for e in run.graph.edges if e.to_node.startswith("po:PO-9")]
+
+    resolve_approval(store, plan_id=run.plan_id, approved=True)
+
+    po_edges = [e for e in run.graph.edges if e.to_node.startswith("po:PO-9")]
+    assert len(po_edges) == _EXPECTED_SPLITS
+    assert run.graph.duplicate_edges() == []
+
+    # Appending is idempotent — a second approval must not duplicate edges.
+    resolve_approval(store, plan_id=run.plan_id, approved=True)
+    assert len([e for e in run.graph.edges if e.to_node.startswith("po:PO-9")]) == (
+        _EXPECTED_SPLITS
+    )
+    assert run.graph.duplicate_edges() == []
+
+
+def test_created_pos_become_dependable_inbound_for_the_next_coverage_pass(store):
+    """A created PO is `pending`, which IS a dependable inbound status — so
+    the next coverage pass credits it. That is what makes the executed plan
+    actually change the coverage picture rather than only being recorded."""
+    _elicit_claim(store)
+    run_pipeline(store, component_id="COMP-104", now=NOW)
+
+    created = [
+        w.resulting_state["po_id"]
+        for w in store.erp_log
+        if w.action == "create_alternate_po"
+    ]
+    coverage = compute_coverage(store, now=NOW)
+    inbound = {
+        po_id
+        for result in coverage.results
+        if result.component_id == "COMP-104"
+        for po_id in result.inbound_po_ids
+    }
+    for po_id in created:
+        assert po_id in inbound

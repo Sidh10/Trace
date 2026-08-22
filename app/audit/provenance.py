@@ -135,6 +135,7 @@ from app.engine.ratchet import DecisionBrief
 from app.engine.solver import SolverResult
 from app.engine.verify import DETERMINISTIC_MODEL_VERSION, VerificationReport
 from app.environment.clock import clock
+from app.environment.schemas import ERPUpdateResponse
 
 # ARCHITECTURE.md §7's exact relation set. Six, closed, no additions.
 Relation = Literal["Support", "Depend-on", "Contradict", "Invalidate", "Trigger", "Update"]
@@ -165,6 +166,7 @@ NODE_KINDS: frozenset[str] = frozenset(
         "warehouse",         # warehouse-truth stock figure, keyed by component_id
         "erp",               # ERP headline stock figure, keyed by component_id
         "deadline_constraint",  # the deadline feasibility filter, keyed by component_id
+        "erp_write",         # one POST /erp/update response, keyed by update_id
     }
 )
 
@@ -709,6 +711,95 @@ def _add_planner(builder: _Builder, plan: Plan) -> None:
     )
 
 
+def _add_erp_writes(
+    builder: _Builder, plan: Plan, erp_writes: list[ERPUpdateResponse]
+) -> None:
+    """The irreversible action, in the trail.
+
+    Every `POST /erp/update` the orchestrator performed for this plan gets an
+    edge, so the audit trail shows not just what was decided but what was
+    actually written — the one thing in this system that cannot be taken
+    back (AGENTS.md rule 5). Two shapes:
+
+      * `create_alternate_po` -> `Trigger` from the plan to the PO it caused
+        to exist. `Trigger` rather than `Support` because the plan is the
+        cause, not evidence: the PO exists BECAUSE the plan said so, and
+        reading the chain forward (event -> plan -> po) is how an auditor
+        traces a disruption all the way to the purchase it produced.
+      * anything else (currently `store_plan`) -> `Update` from the plan to
+        the write record. The plan's state was recorded; nothing new was
+        caused.
+
+    Note the direction is plan -> written thing in both cases, so the graph
+    stays forward-traceable from MONITOR's poll through to the PO.
+    """
+    plan_node = node("plan", plan.plan_id)
+
+    for write in erp_writes:
+        if write.action == "create_alternate_po":
+            created_po_id = write.resulting_state.get("po_id", write.update_id)
+            builder.edge(
+                "Trigger",
+                plan_node,
+                node("po", created_po_id),
+                "ratchet",
+                [plan.plan_id, created_po_id, write.update_id],
+                (
+                    f"{plan.plan_id} created {created_po_id} via "
+                    f"{write.action} ({write.update_id}): "
+                    f"{write.resulting_state.get('quantity')} units of "
+                    f"{write.resulting_state.get('component_id')} from "
+                    f"{write.resulting_state.get('supplier_id')} @ "
+                    f"{write.resulting_state.get('unit_price')}, expected "
+                    f"{write.resulting_state.get('expected_delivery')}. "
+                    "IRREVERSIBLE (AGENTS.md rule 5)."
+                ),
+            )
+        else:
+            builder.edge(
+                "Update",
+                plan_node,
+                node("erp_write", write.update_id),
+                "ratchet",
+                [plan.plan_id, write.update_id],
+                (
+                    f"{write.action} recorded {plan.plan_id} to the ERP as "
+                    f"{write.update_id}. IRREVERSIBLE (AGENTS.md rule 5)."
+                ),
+            )
+
+
+def append_erp_write_edges(
+    graph: ProvenanceGraph,
+    plan: Plan,
+    erp_writes: list[ERPUpdateResponse],
+    *,
+    now: Optional[datetime] = None,
+) -> ProvenanceGraph:
+    """Append ERP-write edges to a graph that was already built.
+
+    Needed because an escalated plan's write happens LATER, at human
+    approval, long after its graph was constructed. Rebuilding the whole
+    graph then would need every upstream report again; appending the edges
+    that actually became true is both cheaper and more honest — the earlier
+    edges did not change, so they should not be recomputed.
+
+    Idempotent: an `update_id` already cited in the graph is not added twice.
+    """
+    now = clock.now() if now is None else now
+    already_cited = {
+        record_id for edge in graph.edges for record_id in edge.input_record_ids
+    }
+    fresh = [w for w in erp_writes if w.update_id not in already_cited]
+    if not fresh:
+        return graph
+
+    builder = _Builder(now)
+    _add_erp_writes(builder, plan, fresh)
+    graph.edges.extend(builder.edges)
+    return graph
+
+
 def _add_ratchet(builder: _Builder, brief: DecisionBrief, plan: Optional[Plan]) -> None:
     """Trigger per fired condition; one explicit Update when none fired."""
     brief_key = brief.plan_id or brief.component_id
@@ -840,6 +931,7 @@ def build_provenance_graph(
     solver_result: Optional[SolverResult] = None,
     plan: Optional[Plan] = None,
     brief: Optional[DecisionBrief] = None,
+    erp_writes: Optional[list[ERPUpdateResponse]] = None,
     now: Optional[datetime] = None,
 ) -> ProvenanceGraph:
     """Build the graph from whichever stages actually ran. Every argument is
@@ -867,6 +959,8 @@ def build_provenance_graph(
         _add_planner(builder, plan)
     if brief is not None:
         _add_ratchet(builder, brief, plan)
+    if plan is not None and erp_writes:
+        _add_erp_writes(builder, plan, erp_writes)
 
     return ProvenanceGraph(
         built_at=now,
