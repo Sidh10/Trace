@@ -107,6 +107,7 @@ Everything above the cut-line works end to end before anything below it starts.
 | 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | ✅ built |
 | 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | ✅ built |
 | 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | ✅ built |
+| 7b | **Orchestrator** (`app/api/routes.py` + `app/main.py`) — items 1-7 assembled into one callable chain, `POST /agent/handle-event`; **owns the single ERP-write boundary** (rule 5) and the human-approval step `POST /agent/approval/{plan_id}` | enabler | ✅ built |
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
 | 8 | Staleness detector + earliest-conflict re-entry + post-replan verification | 10% | 2h |
 | 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | 1h |
@@ -411,15 +412,35 @@ trace/
 │   ├── llm/
 │   │   └── gemini_client.py      # thin wrapper, only called when TRACE_LLM_ENABLED
 │   └── api/
-│       └── routes.py             # orchestrator endpoints the frontend calls
+│       └── routes.py             # ✅ ORCHESTRATOR — the assembled pipeline
+│                                 #    + THE ERP-WRITE BOUNDARY (rule 5)
 ├── static/
 │   └── index.html                # items 11/12 — coverage board + judge panel
 └── tests/
+    ├── conftest.py               # LLM-off default + outbound-network kill switch
     ├── test_coverage.py
+    ├── test_monitor.py
+    ├── test_verify.py
     ├── test_solver.py
+    ├── test_planner.py
     ├── test_ratchet.py
-    └── test_llm_optional_mode.py  # proves AGENTS.md rule 2 holds
+    ├── test_provenance.py
+    └── test_orchestrator.py      # the ERP-write boundary lives or dies here
 ```
+
+**`app/api/routes.py` is the only caller of `POST /erp/update` in this
+codebase** — asserted by
+`tests/test_orchestrator.py::test_the_orchestrator_is_the_only_caller_of_erp_update`,
+which greps every engine module. One call site, behind one guard
+(`_write_erp_once`), keyed on `plan_id`. See §12.
+
+**`tests/conftest.py` blocks all non-loopback outbound network calls for the
+whole suite.** Three separate times a test enabled the LLM and mocked only
+one of the two entry points, leaking a live Gemini call and free-tier quota
+while still passing. The guard turns a mock gap into a loud failure. Loopback
+is deliberately allowed: on Windows, asyncio's ProactorEventLoop builds its
+self-pipe with `socket.socketpair()`, and blocking that breaks
+`fastapi.testclient.TestClient` outright.
 
 ---
 
@@ -474,3 +495,45 @@ silent-failure rate is zero, here's the baseline's" is a line a judge repeats.
 claim-verification disabled: it gets fooled by SUP-21 and the line stops. That
 proves each component earns its place, which is a far better answer than "we
 built it because the spec said so."
+
+---
+
+## 12. The ERP-write boundary (orchestrator, item 7b)
+
+AGENTS.md rule 5: *"Exactly one action is irreversible: `POST /erp/update`."*
+That is a claim about the whole system, so it needs one enforcement point,
+not a convention each module is trusted to follow.
+
+**One call site.** `app/api/routes.py::_write_erp_once` is the only place in
+this codebase that calls `store.update_erp`. Every engine module is asserted
+free of it by test. RATCHET decides; it does not write (its own §3 stage is
+drawn separately from `ERP WRITE` for exactly this reason).
+
+**Three guarantees, each with a test that fails if it breaks:**
+
+| Guarantee | Test |
+|---|---|
+| Write fires **iff** the verdict is `execute` | `test_erp_write_fires_when_the_verdict_is_execute`, `test_escalate_produces_zero_erp_writes_before_approval` |
+| `escalate` writes **nothing** and waits for a human | `test_escalate_produces_zero_erp_writes_before_approval`, `test_escalate_with_no_feasible_plan_also_writes_nothing` |
+| Idempotent per `plan_id`, however it is reached | `test_firing_the_same_disruption_twice_produces_exactly_one_erp_write`, `test_approving_twice_produces_exactly_one_erp_write`, `test_approval_after_an_execute_does_not_write_a_second_time` |
+
+Not even `record_escalation` is written on the escalate path — it is one of
+§5.9's six actions and therefore itself an irreversible write. A rejected
+plan is closed on the run record, with no ERP write at all.
+
+**Two idempotency registries, both needed.** `_ERP_WRITES_BY_PLAN` keys on
+`plan_id` and stops a second write for one plan (covers double approval).
+`_RUNS_BY_COMPONENT` keys on `component_id` and stops the pipeline minting a
+*second* `plan_id` for the same unresolved disruption — without it, "fire the
+same disruption twice" produces PLAN-0001 and PLAN-0002, and the per-plan
+guard correctly lets both through. **Item 8 (staleness) is what will
+legitimately invalidate the run cache**; `reset_orchestrator_state()` is the
+hook until then, and the judge panel (item 11) needs it between injections
+alongside `build_store()`'s clean slate.
+
+**Stage order.** The orchestrator runs COVERAGE before MONITOR — MONITOR is
+drawn first in §3 because it *initiates* the loop, but its gate is
+`coverage.polling_targets()`, so it cannot run first. TOOL GATE is not a
+separate call: it is already embodied in MONITOR's load-bearing gate and
+VERIFY's reuse of MONITOR's tracking read. `PipelineRun.stages` records the
+sequence actually walked.

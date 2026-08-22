@@ -31,7 +31,15 @@ from app.environment.schemas import (
     SupplierRecord,
     TrackingRecord,
 )
-from app.environment.seed_data import STATE
+# Imported as a MODULE, not `from ... import STATE`, so the name resolves at
+# call time. A direct name binding here would freeze this router to whichever
+# Store existed at import — and the orchestrator (app/api/routes.py) resolves
+# it dynamically, so the two could end up serving DIFFERENT Store instances:
+# a disruption injected through these endpoints would be invisible to the
+# agent planning against the other one. That is a demo-killer for the judge
+# panel (item 11), which injects here and reads results there. Found while
+# smoke-testing the orchestrator end to end.
+from app.environment import seed_data
 
 router = APIRouter()
 
@@ -43,12 +51,12 @@ router = APIRouter()
 
 @router.get("/inventory", response_model=list[InventoryRecord])
 def list_inventory() -> list[InventoryRecord]:
-    return STATE.list_inventory()
+    return seed_data.STATE.list_inventory()
 
 
 @router.get("/inventory/{component_id}", response_model=InventoryRecord)
 def get_inventory(component_id: str) -> InventoryRecord:
-    record = STATE.get_inventory(component_id)
+    record = seed_data.STATE.get_inventory(component_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"unknown component_id: {component_id}")
     return record
@@ -64,12 +72,12 @@ def list_purchase_orders(
     status: Optional[str] = Query(default=None),
     component_id: Optional[str] = Query(default=None),
 ) -> list[PurchaseOrder]:
-    return STATE.list_purchase_orders(status=status, component_id=component_id)
+    return seed_data.STATE.list_purchase_orders(status=status, component_id=component_id)
 
 
 @router.get("/purchase-orders/{po_id}", response_model=PurchaseOrder)
 def get_purchase_order(po_id: str) -> PurchaseOrder:
-    record = STATE.get_purchase_order(po_id)
+    record = seed_data.STATE.get_purchase_order(po_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"unknown po_id: {po_id}")
     return record
@@ -82,7 +90,7 @@ def get_purchase_order(po_id: str) -> PurchaseOrder:
 
 @router.get("/suppliers", response_model=list[SupplierRecord])
 def list_suppliers(component_id: Optional[str] = Query(default=None)) -> list[SupplierRecord]:
-    return STATE.list_suppliers(component_id=component_id)
+    return seed_data.STATE.list_suppliers(component_id=component_id)
 
 
 # --------------------------------------------------------------------------
@@ -92,9 +100,9 @@ def list_suppliers(component_id: Optional[str] = Query(default=None)) -> list[Su
 
 @router.post("/suppliers/{supplier_id}/message", response_model=SupplierMessageResponse)
 def message_supplier(supplier_id: str, req: SupplierMessageRequest) -> SupplierMessageResponse:
-    if supplier_id not in STATE.suppliers:
+    if supplier_id not in seed_data.STATE.suppliers:
         raise HTTPException(status_code=404, detail=f"unknown supplier_id: {supplier_id}")
-    return STATE.send_supplier_message(supplier_id, req.to, req.subject, req.body)
+    return seed_data.STATE.send_supplier_message(supplier_id, req.to, req.subject, req.body)
 
 
 # --------------------------------------------------------------------------
@@ -110,12 +118,12 @@ def list_inbox(
     supplier_id: Optional[str] = Query(default=None),
     po_id: Optional[str] = Query(default=None),
 ) -> list[SupplierMessage]:
-    return STATE.list_inbox(supplier_id=supplier_id, po_id=po_id)
+    return seed_data.STATE.list_inbox(supplier_id=supplier_id, po_id=po_id)
 
 
 @router.get("/inbox/{message_id}", response_model=SupplierMessage)
 def get_inbox_message(message_id: str) -> SupplierMessage:
-    message = STATE.get_message(message_id)
+    message = seed_data.STATE.get_message(message_id)
     if message is None:
         raise HTTPException(status_code=404, detail=f"unknown message_id: {message_id}")
     return message
@@ -128,9 +136,9 @@ def get_inbox_message(message_id: str) -> SupplierMessage:
 
 @router.post("/rfq", response_model=list[RFQQuote])
 def request_rfq(req: RFQRequest) -> list[RFQQuote]:
-    if req.component_id not in STATE.inventory:
+    if req.component_id not in seed_data.STATE.inventory:
         raise HTTPException(status_code=404, detail=f"unknown component_id: {req.component_id}")
-    return STATE.request_rfq(req)
+    return seed_data.STATE.request_rfq(req)
 
 
 # --------------------------------------------------------------------------
@@ -140,7 +148,7 @@ def request_rfq(req: RFQRequest) -> list[RFQQuote]:
 
 @router.post("/approval/check", response_model=ApprovalCheckResponse)
 def check_approval(req: ApprovalCheckRequest) -> ApprovalCheckResponse:
-    return STATE.check_approval(req)
+    return seed_data.STATE.check_approval(req)
 
 
 # --------------------------------------------------------------------------
@@ -151,7 +159,7 @@ def check_approval(req: ApprovalCheckRequest) -> ApprovalCheckResponse:
 @router.post("/erp/update", response_model=ERPUpdateResponse)
 def update_erp(req: ERPUpdateRequest) -> ERPUpdateResponse:
     try:
-        return STATE.update_erp(req)
+        return seed_data.STATE.update_erp(req)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -163,7 +171,7 @@ def update_erp(req: ERPUpdateRequest) -> ERPUpdateResponse:
 
 @router.get("/tracking/{po_id}", response_model=TrackingRecord)
 def get_tracking(po_id: str) -> TrackingRecord:
-    record = STATE.get_tracking(po_id)
+    record = seed_data.STATE.get_tracking(po_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"unknown po_id: {po_id}")
     return record
@@ -176,7 +184,7 @@ def get_tracking(po_id: str) -> TrackingRecord:
 
 @router.get("/production-schedule", response_model=list[ProductionOrder])
 def get_production_schedule() -> list[ProductionOrder]:
-    return STATE.list_production_schedule()
+    return seed_data.STATE.list_production_schedule()
 
 
 # --------------------------------------------------------------------------

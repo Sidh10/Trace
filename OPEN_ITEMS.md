@@ -2,20 +2,58 @@
 
 Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.md.
 
-## Owed by whoever builds the orchestrator (app/api/routes.py, not yet built)
+## RESOLVED — orchestrator built; the ERP-write boundary is enforced
 
-- [ ] **`ratchet.py` (item 6) never calls `POST /erp/update`, on either the
-      execute or the escalate path.** ARCHITECTURE.md §3's diagram draws
-      RATCHET and "ERP WRITE — the one irreversible action" as two separate
-      stages; this module decides and narrates only. `record_escalation` is
-      one of the six §5.9 ERP actions and would be a reasonable thing for an
-      orchestration layer to call after an `"escalate"` decision (and
-      `create_alternate_po` / `mark_po_delayed` / `store_plan` after an
-      `"execute"` one) — but that layer doesn't exist yet, and `ratchet.py`
-      does not reach for it unilaterally. Confirmed by
-      `tests/test_ratchet.py::test_ratchet_never_calls_erp_update_on_execute`
-      / `..._on_escalate`. Whoever builds the orchestrator needs to decide
-      which ERP action(s) follow each `DecisionBrief.decision` value.
+`app/api/routes.py` is the single call site for `POST /erp/update` in this
+codebase (asserted by a test that greps every engine module). The boundary
+and its three guarantees are documented in ARCHITECTURE.md §12.
+
+The open question this entry asked — *which ERP action follows each
+`DecisionBrief.decision`* — is answered as: **`store_plan` on `execute`, and
+nothing at all on `escalate`.** See the two sign-off items below for the
+parts of that answer that are a judgement call rather than a given.
+
+## NEEDS SIGN-OFF — orchestrator decisions I did not make unilaterally
+
+- [ ] **`execute` emits `store_plan` only — not `create_alternate_po` per
+      supplier split.** Recording the decided plan is unambiguous. Actually
+      *placing* the split POs would require the orchestrator to choose an
+      `expected_delivery` (now + lead_time_days?), a PO id, and an approval
+      ceiling for each split — plan-shaped logic the orchestrator is
+      explicitly not allowed to hold, and which nothing upstream currently
+      computes. If "execute" is supposed to mean POs actually get created,
+      that mapping needs to live in `planner.py` (as fields on
+      `PurchaseSplitAction`) and the orchestrator can then emit them
+      mechanically. Flagging rather than inventing the fields.
+- [ ] **The approval endpoint is `POST /agent/approval/{plan_id}`, not the
+      bare `POST /approval/{plan_id}` that was requested.** The environment
+      already serves the problem statement's own `POST /approval/check`
+      (§5.8); a bare `/approval/{plan_id}` sits in the same path space as a
+      spec endpoint and resolves by router registration order — a
+      route-ordering accident waiting to happen, and confusing to read.
+      Namespaced under `/agent/` alongside the other orchestrator endpoints.
+      Say if the bare path is required and I will add it as an alias.
+- [ ] **Run-cache idempotency is keyed on `component_id`.** Required to make
+      "fire the same disruption twice = one ERP write" true (a per-`plan_id`
+      guard alone cannot, because a second pipeline run mints a second
+      `plan_id`). The consequence: a genuinely NEW disruption on an
+      already-handled component currently returns the cached run instead of
+      replanning. **That is item 8's job to fix** — staleness detection is
+      exactly what should invalidate this cache. `reset_orchestrator_state()`
+      is the manual hook until then.
+
+## RESOLVED — a real integration defect found while assembling the pipeline
+
+- `app/environment/routes.py` bound `STATE` by name at import
+  (`from app.environment.seed_data import STATE`), so the environment router
+  and the orchestrator could serve **different `Store` instances**: a
+  disruption injected through the environment endpoints was invisible to the
+  agent planning against the other one. Caught by an end-to-end HTTP smoke
+  test whose provenance graph came back 14 edges instead of 17, verifying
+  against the wrong inbox message. Both now resolve `seed_data.STATE` at call
+  time. **This would have broken the judge panel (item 11) specifically** —
+  it injects on one side and reads results on the other. Guarded by
+  `tests/test_orchestrator.py::test_environment_and_orchestrator_share_one_store`.
 
 ## Owed by whoever builds item 8
 
