@@ -1,0 +1,392 @@
+# ARCHITECTURE.md
+
+The technical build reference for TRACE. Read `AGENTS.md` first for the rules
+this architecture is required to satisfy, and `PROJECT.md` for why any of this
+matters. This file covers **how it's built**, only.
+
+---
+
+## 1. Stack
+
+```
+Python 3.11 + FastAPI       simulated environment + agent service
+SQLite                       state, supplier reliability memory, audit log
+Gemini free tier             function calling — see §2, Task Zero
+Single static HTML file      coverage board + judge panel, static/index.html
+```
+
+**Rejected, do not add:** OR-Tools, MILP solvers, LangGraph, PostgreSQL,
+NetworkX / knowledge graphs, React, React Flow, npm, any build step, multi-agent
+frameworks, blockchain / hash-chained ledgers.
+
+*Why:* the search space is one component across ~10–20 suppliers with an MOQ
+constraint — brute-force enumeration over supplier pairs is **also exact**,
+builds in a fraction of the time, and carries no "explain your formulation"
+risk in Q&A. A knowledge graph models depth the data doesn't have — production
+records carry `component_required_per_unit`, a single level, no multi-tier BOM.
+
+---
+
+## 2. TASK ZERO — before anything else
+
+Prove a **Gemini function-calling round trip** end to end: one script, one
+tool, one successful structured response. `scripts/task_zero_gemini_check.py`.
+
+Nothing else starts until this passes or fails. If it fails, AGENTS.md rule 2
+(LLM-optional mode) means the project still has a working submission — but the
+team needs to know within the first hour, not the twelfth.
+
+---
+
+## 3. Control flow
+
+A bounded loop — not a straight pipeline, not an open agent loop. See
+AGENTS.md rule 6 for why both of those fail.
+
+```
+   ┌──────────────────────────────────────────────────────────────┐
+   │  SIMULATED ENVIRONMENT (ours, spec schemas verbatim)          │
+   │  inventory · POs · suppliers · production · inbox · tracking  │
+   │  + simulated clock                                            │
+   └───────────────────────────┬──────────────────────────────────┘
+                               ▼
+   MONITOR ─── gated poll on LOAD-BEARING POs — those whose withdrawal alone
+      │        turns some production order critical (not "thin-coverage POs";
+      │        at Beat 1 PROD-882 reads healthy and the poll must still fire)
+      ▼
+   COVERAGE ENGINE (deterministic) — two metrics, both reported
+      │        days_of_coverage_on_hand = usable_stock ÷ daily_usage
+      │            → what we actually hold
+      │        days_of_coverage = on-hand + dependable inbound POs
+      │            → what we have if suppliers keep their word
+      │        THE GAP BETWEEN THEM IS THE EXPOSURE TO SUPPLIER CLAIMS
+      │        cross-ref production priority + deadline
+      │        detect ERP-vs-warehouse mismatch, log as contradiction
+      ▼
+   TOOL GATE ── precondition check: is this call actually needed?
+      ▼
+   VERIFY ──── supplier claim vs tracking; contradiction →
+      │        exponentially-weighted reliability downgrade (provenance only)
+      ▼
+   HARD FILTER ─ drop uncertified / budget-infeasible candidates
+      │          BEFORE spending an RFQ call
+      ▼
+   SOLVER ──── Pareto non-domination over price, lead time, reliability,
+      │        quality, MOQ, available qty. No weighted-sum collapse.
+      ▼
+   PLAN ────── multi-action: supplier split + stock allocation +
+      │        safety-stock draw (with justification) + production reschedule
+      ▼
+   RATCHET ─── hard escalation triggers (AGENTS.md rule 3). Execute or escalate.
+      ▼
+   ERP WRITE ─ the one irreversible action
+      ▼
+   AUDIT ───── provenance graph (§4, item 7)
+
+   ▲                                                     │
+   └──── STALENESS DETECTOR: re-enter at the earliest ────┘
+         invalidated stage, not from the top.
+         Then POST-REPLAN VERIFICATION: does the new plan still hold?
+```
+
+---
+
+## 4. Components — build in this order
+
+Everything above the cut-line works end to end before anything below it starts.
+
+| # | Component | Serves | Est. |
+|---:|---|---|---:|
+| 0 | **Task zero: Gemini function-call round trip** | blocking | 30m |
+| 1 | Simulated env: spec schemas verbatim, REST surface (§6), simulated clock | enabler | 3h |
+| 2 | Coverage engine: **two metrics** — `days_of_coverage_on_hand` (usable ÷ daily usage) and `days_of_coverage` (+ dependable inbound). Thresholds are spec-field comparisons, never invented constants: `critical` = coverage < days_to_deadline; `at_risk` = projection dips below `safety_stock` before deadline. Plus ERP-vs-warehouse mismatch detection | 35% | ✅ built |
+| 2b | Gated polls on **load-bearing** POs — withdrawal alone turns some order critical. Broader than "thin-coverage POs" by design; the thin gate misses PO-7712 at Beat 1 | 35% + 10% | ✅ built |
+| 3 | Claim verification vs tracking; provenance-only reliability update, exponentially weighted `B(t+1) = (1−λ)B(t) + λs(t+1)`; probe only when a decision depends on the claim | 15% | 2h |
+| 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | 2.5h |
+| 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** | 35% | 2h |
+| 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | 30m |
+| 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | 1.5h |
+| 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | 2h |
+| | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |
+| 8 | Staleness detector + earliest-conflict re-entry + post-replan verification | 10% | 2h |
+| 9 | Contingency plans with explicit triggers `{primary, failure_trigger, fallback}` | 10% | 1h |
+| 10 | Tool-call precondition logging + count-vs-necessity summary in audit trail | 10% | 45m |
+| 11 | **Judge-controlled disruption panel** (single HTML file) | demo | 1h |
+| 12 | Coverage board — days of coverage per production order, live | demo | 1.5h |
+| 13 | **Multi-baseline comparison harness** — see §11 below | demo | 3h |
+
+Items 1–7 are a complete, scoring submission on their own. Items 8–13 are the
+difference between placing and winning.
+
+**Parallelisation (3–4 people, own Claude accounts):**
+- **A** — item 1 (environment + clock), hand off early, help B/C, then 11/12
+- **B** — 2 / 2b / 5 / 5b (the continuity spine)
+- **C** — 3 / 4 / 6 (the decision spine)
+- **D** — 7, then 8 / 9 / 10, then 13
+
+Per-person estimated total: 5.25–6h each — balanced, but not evenly *timed*.
+A finishes item 1 (3h) early and should actively help B or C rather than sit
+idle until 11/12 start. Integrate at hour 8, not hour 15.
+
+---
+
+## 5. What the simulator may and may not contain
+
+We build the simulator, so this boundary matters more than usual — see
+AGENTS.md rule 8.
+
+**Permitted — the problem statement specifies these:**
+- Simulated clock and time pressure (§4.7; Scenario 6 "12 simulated hours"; §17 "recheck after 6 simulated hours")
+- Quote expiry — the RFQ schema ships `quote_valid_hours: 6`
+- Tracking that contradicts a supplier claim (§5.10, `label_created_no_pickup`)
+- Stale ERP inventory vs warehouse truth (Scenario 2)
+- Mid-run disruption injection (§6, "the simulation may inject new disruptions")
+
+**Forbidden — not in the spec, do not invent:**
+- **PO cancellation / cancellation cost.** The ERP action list (spec §5.9) is:
+  mark delayed, create alternate PO, attach notes, update risk status, record
+  escalation, store plan. No cancel. Any design needing one is dead.
+- Multi-tier BOM networks, carrier/route/hazmat data, customer SLA tiers,
+  freight corridors. Wrong domain.
+
+---
+
+## 6. Data model
+
+Use the problem statement's schemas verbatim and its sample records (COMP-104
+Motor Driver IC, Pune-Plant-1, SUP-21/42/37/18, PO-7712, PROD-882, PROD-914). Do
+not invent a data model; do not rename fields. Extend the same shape for extra
+scenarios.
+
+```
+GET  /inventory                    GET  /inventory/{component_id}
+GET  /purchase-orders              GET  /purchase-orders/{po_id}
+GET  /suppliers?component_id=      POST /suppliers/{supplier_id}/message
+POST /rfq                          POST /approval/check
+POST /erp/update                   GET  /production-schedule
+GET  /tracking/{po_id}
+```
+
+Dataset: 20–50 components, 10–20 suppliers, 20–40 POs, 5–10 production orders,
+10–20 supplier messages.
+
+---
+
+## 7. Shared data structures — proposed shape, not gospel
+
+These prevent four people building four incompatible objects for the same
+concept. Adjust field names as the build reveals a better fit, but agree the
+change with whoever owns the consuming component before renaming a field.
+
+**DisruptionEvent** — emitted by both COVERAGE and MONITOR (COVERAGE raises
+`coverage_breach` / `inventory_mismatch`; MONITOR raises `supplier_delay` from
+a poll contradiction). `coverage_breach` is an *effect*; the other five are
+*causes*. Do not conflate it with `inventory_mismatch`.
+```json
+{
+  "event_id": "EVT-0001",
+  "type": "supplier_delay | inventory_mismatch | demand_spike | expedite_unavailable | priority_change | coverage_breach",
+  "component_id": "COMP-104",
+  "po_id": "PO-7712",
+  "production_order_id": "PROD-882",
+  "detail": { "...": "see below — a dict, not free text" },
+  "detected_at": "<sim-clock timestamp>",
+  "source": "proactive_poll | supplier_message | erp_check"
+}
+```
+
+`detail` is a **dict**, not free text — this superseded an earlier draft of
+this section; `coverage.py` and `monitor.py` both shipped the dict shape
+before this line caught up (OPEN_ITEMS.md). Its keys are type-specific, not
+one fixed schema across all six `type` values. Every emitter that produces a
+human-readable narration puts it under a `"summary"` key first; the remaining
+keys are the figures that justify it, so items 6 and 7 can cite a number
+without recomputing it. The three types built so far:
+
+- **`supplier_delay`** (MONITOR, `proactive_poll`) — `summary` (string, e.g.
+  "PO-7712 is recorded as in_transit, but tracking reads
+  label_created_no_pickup..."), `po_status`, `tracking_status`,
+  `last_movement`, `exposure_days`, `load_bearing_for` (list of
+  `production_order_id`), `detected_by`.
+- **`coverage_breach`** (COVERAGE, `erp_check`) — structured only, no
+  `summary` key: `days_of_coverage`, `days_of_coverage_on_hand`,
+  `days_to_deadline`, `status`, `reason`, `priority`, `component_required`,
+  `depends_on_po_ids`.
+- **`inventory_mismatch`** (COVERAGE, `erp_check`) — the full
+  `InventoryContradiction` record: `component_id`, `erp_current_stock`,
+  `warehouse_usable_stock`, `erp_overstatement_units`,
+  `erp_snapshot_age_hours`, `coverage_days_if_erp_believed`,
+  `coverage_days_on_warehouse_truth`, `decision_changing`, `note` (this one
+  carries prose in `note`, not `summary` — a genuine inconsistency, left as
+  written rather than silently reconciled; a future pass unifying event
+  narration onto `summary` is a real cleanup, not required to unblock 6/7).
+
+`demand_spike`, `expedite_unavailable`, `priority_change` are not built yet —
+items 8/9 add their own keys under the same dict-with-a-`summary`-when-narrated
+convention.
+
+**Plan** — SOLVER + PLANNER output, consumed by RATCHET and AUDIT
+```json
+{
+  "plan_id": "PLAN-0001",
+  "actions": [
+    {"type": "purchase_split", "supplier_id": "SUP-42", "qty": 600},
+    {"type": "purchase_split", "supplier_id": "SUP-37", "qty": 300},
+    {"type": "safety_stock_draw", "days": 4, "justification": "..."},
+    {"type": "production_reschedule", "production_order_id": "PROD-914", "delay_days": 2}
+  ],
+  "rejected_alternatives": [
+    {"option": "SUP-18 only", "saved": 12000, "regret": "disqualified — uncertified"}
+  ],
+  "cost_of_inaction": 340000,
+  "total_cost": 171000,
+  "reversibility": "idempotent | reversible | compensable | irreversible"
+}
+```
+
+**ProvenanceEdge** — one entry in the audit graph (§4, item 7)
+```json
+{
+  "edge_id": "PROV-0001",
+  "relation": "Support | Depend-on | Contradict | Invalidate | Trigger | Update",
+  "from": "tracking:PO-7712",
+  "to": "claim:SUP-21-dispatched",
+  "model_version": "gemini-<version> | deterministic",
+  "timestamp": "<sim-clock timestamp>"
+}
+```
+
+**ReliabilityRecord** — VERIFY's persistent memory per supplier
+```json
+{
+  "supplier_id": "SUP-21",
+  "score": 0.62,
+  "last_updated": "<sim-clock timestamp>",
+  "last_change_reason": "tracking_contradiction | confirmed_delivery"
+}
+```
+
+---
+
+## 8. Simulator invariants — do not break these
+
+Both were found by smoke-testing item 2 and both are load-bearing for the demo.
+Keep the regression tests that guard them.
+
+**`build_store()` must return a clean slate.** Anchor records are deep-copied
+per build. If Stores share module-level anchor objects, marking PO-7712 delayed
+in one run leaks into the next — which means **the judge panel (Beat 5) cannot
+reset between injections.** This is a demo-killer, not a test nicety.
+
+**Anchor IDs are reserved.** `_assert_anchor_ids_reserved()` runs from
+`build_store()` and enforces all eight spec IDs (COMP-104, SUP-21/42/37/18,
+PO-7712, PROD-882, PROD-914). Generated ranges must never collide: `Store` keys
+by ID, so a collision silently *overwrites* an anchor while collection counts
+still look correct. `PROD-{900+i}` over `range(5)` sits ten below PROD-914 —
+one edit from breaking. The assertion raises explicitly so it survives `python -O`.
+
+**Seed collection sizes stay inside spec §16 ranges** after any seed edit:
+components 20–50, suppliers 10–20, POs 20–40, production orders 5–10, messages
+10–20. Fixing one collection has twice now pushed another out of range.
+
+---
+
+## 9. Repository layout
+
+```
+trace/
+├── AGENTS.md
+├── CLAUDE.md
+├── PROJECT.md
+├── ARCHITECTURE.md
+├── BRAND.md
+├── .env.example
+├── .gitignore
+├── requirements.txt
+├── scripts/
+│   └── task_zero_gemini_check.py
+├── app/
+│   ├── main.py                 # FastAPI app; mounts routes + static/
+│   ├── config.py                # env vars, TRACE_LLM_ENABLED flag
+│   ├── environment/              # item 1 — the simulator
+│   │   ├── schemas.py            # spec's data shapes, verbatim
+│   │   ├── seed_data.py          # sample records + generated dataset
+│   │   ├── clock.py              # simulated time
+│   │   └── routes.py             # the §6 REST surface
+│   ├── engine/
+│   │   ├── coverage.py           # item 2 — days-of-coverage, mismatch detection
+│   │   ├── monitor.py            # item 2b — gated proactive polling
+│   │   ├── verify.py             # item 3 — claim verification, reliability EWMA
+│   │   ├── solver.py             # item 4 — hard filter + Pareto
+│   │   ├── planner.py            # item 5 / 5b — multi-action plans, safety stock
+│   │   ├── ratchet.py            # item 6 — escalation rules, decision brief
+│   │   ├── staleness.py          # item 8 — staleness detector, re-entry
+│   │   └── contingency.py        # item 9 — trigger / fallback plans
+│   ├── audit/
+│   │   └── provenance.py         # item 7 — the provenance graph
+│   ├── llm/
+│   │   └── gemini_client.py      # thin wrapper, only called when TRACE_LLM_ENABLED
+│   └── api/
+│       └── routes.py             # orchestrator endpoints the frontend calls
+├── static/
+│   └── index.html                # items 11/12 — coverage board + judge panel
+└── tests/
+    ├── test_coverage.py
+    ├── test_solver.py
+    ├── test_ratchet.py
+    └── test_llm_optional_mode.py  # proves AGENTS.md rule 2 holds
+```
+
+---
+
+## 10. Hidden-test coverage
+
+| Hidden test | Handled by |
+|---|---|
+| Supplier delays after confirming | 3 — claim verification + reliability memory |
+| Claims dispatch, tracking contradicts | 3 — provenance-based downgrade |
+| Cheapest supplier fails quality | 4 — certification hard filter before RFQ |
+| High-reliability supplier lacks quantity | 5 — order splitting |
+| Low-reliability supplier is fastest | 4 — Pareto surfaces the tradeoff |
+| Purchase exceeds approval limit | 6 — hard ratchet + decision brief |
+| ERP inventory overstates real stock | 2 — mismatch detection, logged as contradiction |
+| Sudden demand spike | 8 — staleness detector re-triggers coverage |
+| Expedited delivery unavailable | 9 — contingency trigger fires fallback |
+| Production priority changes mid-run | 5 — reschedule is in the action space |
+
+Eight of ten depend on items 5, 8, 9. If those slip, coverage drops to six.
+
+---
+
+## 11. Multi-baseline comparison harness (item 13)
+
+The strongest differentiator available, because it is copy-resistant
+*structurally* rather than conceptually: building baseline variants requires the
+engine to already be modular and working. A team at hour 15 with a monolithic
+agent physically cannot retrofit this.
+
+Run all four variants on the **same judge-selected disruption**:
+
+| Variant | Implementation | Expected to fail on |
+|---|---|---|
+| Static workflow | Fixed stage sequence, staleness detector off | Mid-run disruptions |
+| Cheapest-always | Skip VERIFY, skip reschedule, min price | Quality + supplier claims |
+| Retry-only | Retries failed calls, never re-enters the loop | Expedite-unavailable |
+| **TRACE** | Full pipeline | — |
+
+These are **the same engine with stages disabled**, not three new agents. Build
+them as config flags on the existing pipeline, not as separate code paths.
+
+**Report per variant:** days of coverage protected, total spend, hidden tests
+passed, tool calls used, and **silent-failure rate**.
+
+A *silent failure* is the agent reporting success when the outcome was bad — it
+completes, writes to ERP, and coverage was actually breached. Measure it by
+comparing the agent's claimed outcome against simulator ground truth. Nobody
+else will measure this, it costs ~30 minutes once the harness exists, and "our
+silent-failure rate is zero, here's the baseline's" is a line a judge repeats.
+
+**Free bonus — component ablation.** The same harness runs TRACE with
+claim-verification disabled: it gets fooled by SUP-21 and the line stops. That
+proves each component earns its place, which is a far better answer than "we
+built it because the spec said so."
