@@ -452,6 +452,22 @@ def test_no_numeric_cost_of_inaction_formula_exists_in_the_source():
     assert "=340000" not in source
 
 
+def test_cost_of_inaction_note_is_a_reasoned_decision_not_a_one_line_shrug():
+    """The note must show the search was real: what was checked, what the
+    one concrete fallback formula needed and didn't have, and why two
+    further fallbacks built from data that DOES exist were still rejected
+    (circularity with total_cost; an invented time horizon). A one-liner
+    here would fail the same "don't silently treat None as done" bar the
+    field itself exists to satisfy."""
+    note = COST_OF_INACTION_NOTE.lower()
+    assert "committed sale price" in note or "committed" in note
+    assert "procurement" in note
+    assert "circular" in note
+    assert "time horizon" in note
+    assert "blocking" in note
+    assert len(COST_OF_INACTION_NOTE) > 400  # not a boilerplate sentence
+
+
 # ==========================================================================
 # rejected_alternatives — solver's reasons carried forward, saved computed
 # ==========================================================================
@@ -632,3 +648,362 @@ def test_smoke_against_the_real_current_state(store):
     assert "reliability_score" in sup21_alt.regret
 
     assert plan.cost_of_inaction is None
+
+
+# ==========================================================================
+# Adversarial — a confirmed, logged gap: nothing yet catches "this reschedule
+# is too large to accept." Not fixed here; item 6 (RATCHET) is the
+# architecturally correct place, per AGENTS.md rule 3's own named trigger
+# "no supplier meets deadline -> escalate." See OPEN_ITEMS.md.
+# ==========================================================================
+
+
+def test_ADVERSARIAL_reliability_first_choice_can_silently_blow_a_deadline_reschedule_would_have_avoided(
+    store,
+):
+    """Construct a Pareto set where SELECTION_RULE's own reliability-first
+    tier picks a candidate whose delivery lands 15 days past a HIGH-priority
+    order's 5-day deadline, while the REJECTED alternative (SUP-RISKY) would
+    have made that same deadline comfortably (2 days).
+
+    This is not a bug in allocate_stock or _reschedule_actions — delay_days
+    is computed correctly (ceil(20 - 5) = 15) and the action is tagged
+    correctly (reversible). The gap is architectural: nothing in this module
+    or anywhere else in the pipeline judges whether a 15-day reschedule
+    against a 5-day deadline is an ACCEPTABLE plan to hand back silently, or
+    whether "no supplier meets deadline" (AGENTS.md rule 3's own named hard
+    escalation trigger) should have fired instead of quietly rescheduling.
+    `rejected_alternatives`' regret text for the faster option only cites the
+    reliability_score it lost on — it never mentions that choosing it would
+    have hit the deadline. Logged in OPEN_ITEMS.md as an explicit
+    requirement for item 6.
+    """
+    reliable_but_glacial = SourcingCombination(
+        members=[
+            SupplierOption(
+                supplier_id="SUP-RELIABLE", unit_price=100, quantity=100,
+                available_quantity=100, lead_time_days=20, reliability_score=0.95,
+                quality_score=0.9, min_order_quantity=10,
+            )
+        ],
+        quantity_needed=100, quantity_allocated=100, total_price=10000,
+        lead_time_days=20, reliability_score=0.95, quality_score=0.9,
+        total_min_order_quantity=10, total_available_quantity=100,
+    )
+    fast_but_risky = SourcingCombination(
+        members=[
+            SupplierOption(
+                supplier_id="SUP-RISKY", unit_price=90, quantity=100,
+                available_quantity=100, lead_time_days=2, reliability_score=0.5,
+                quality_score=0.8, min_order_quantity=10,
+            )
+        ],
+        quantity_needed=100, quantity_allocated=100, total_price=9000,
+        lead_time_days=2, reliability_score=0.5, quality_score=0.8,
+        total_min_order_quantity=10, total_available_quantity=100,
+    )
+
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-ADV", quantity_needed=100,
+        pareto_set=[reliable_but_glacial, fast_but_risky], rejected=[],
+        quotes_requested=2, quotes_reused=0,
+    )
+    urgent = _coverage_result(
+        "PROD-URGENT", "high", days_to_deadline=5.0, component_required=100,
+        component_id="COMP-ADV",
+    )
+
+    # Precondition: the rejected alternative genuinely would have made the
+    # deadline. If this ever fails, the test above isn't proving anything.
+    alt_allocation = allocate_stock([urgent], on_hand=0, combination=fast_but_risky)
+    assert alt_allocation[0].on_time is True
+
+    plan = run_planner(store, "COMP-ADV", result, [urgent], now=NOW)
+
+    # SELECTION_RULE, exactly as documented and tested above, picks the
+    # reliable-but-glacial candidate -- reliability (0.95) beats lead time
+    # entirely, regardless of the deadline consequence.
+    assert plan.chosen_combination.supplier_ids == ["SUP-RELIABLE"]
+
+    # allocate_stock / _reschedule_actions compute the miss correctly and
+    # honestly -- this is NOT where the gap is.
+    detail = plan.allocations[0]
+    assert detail.on_time is False
+    assert detail.earliest_full_supply_day == 20.0
+
+    reschedule = plan.reschedule_actions()[0]
+    assert reschedule.production_order_id == "PROD-URGENT"
+    assert reschedule.delay_days == 15  # ceil(20 - 5), a real, large number
+
+    # THE GAP: nothing marks this plan as unacceptable. It returns a normal,
+    # well-formed Plan object -- same shape as any other -- with no signal
+    # anywhere that a HIGH-priority order just got pushed 3x past its
+    # original deadline, and no reference to AGENTS.md rule 3's "no supplier
+    # meets deadline" trigger anywhere in this module.
+    assert plan is not None  # a plan WAS produced -- nothing refused it
+    source = open("app/engine/planner.py", encoding="utf-8").read()
+    assert "no supplier meets deadline" not in source.lower()
+    # No escalation-flag field exists on Plan at all -- a caller inspecting
+    # this object has nothing to check for "does this plan actually work."
+    escalation_related_fields = [
+        f for f in type(plan).model_fields if "escalat" in f.lower() or "deadline" in f.lower()
+    ]
+    assert escalation_related_fields == []
+
+    # The rejected alternative's regret text is genuinely misleading by
+    # omission: it explains why SUP-RISKY lost (reliability), but never
+    # mentions that picking it would have hit the deadline the chosen
+    # option missed by 15 days. An auditor reading only rejected_alternatives
+    # would not learn that a viable, on-time option was passed over.
+    risky_alt = next(
+        a for a in plan.rejected_alternatives if a.option == "SUP-RISKY only"
+    )
+    assert "deadline" not in risky_alt.regret.lower()
+    assert "on_time" not in risky_alt.regret.lower()
+    assert "reliability_score" in risky_alt.regret  # what it DOES say instead
+
+
+# ==========================================================================
+# Item 5b — safety-stock draw, gated on written justification
+# ==========================================================================
+
+
+def _put_inventory(store, component_id, usable_stock, safety_stock, daily_usage):
+    from app.environment.schemas import InventoryRecord
+
+    store.inventory[component_id] = InventoryRecord(
+        component_id=component_id, name="x", current_stock=usable_stock,
+        usable_stock=usable_stock, daily_usage=daily_usage, safety_stock=safety_stock,
+        warehouse="x", last_updated=NOW,
+    )
+
+
+def test_smoke_safety_stock_is_the_only_thing_standing_between_the_plan_and_the_deadline(
+    store,
+):
+    """The scenario the task explicitly asks for: WITHOUT drawing safety
+    stock, the order needs part of a slow (8-day) shipment and misses its
+    5.5-day deadline. WITH the draw (the full 100-unit reserve), on-hand
+    alone (200 operating + 100 drawn = 300) fully covers the order's 300-unit
+    need immediately -- comfortably on time. Confirms the justification names
+    the real gap (2.0 days), the real component, and the real order."""
+    _put_inventory(store, "COMP-SAFETY", usable_stock=300, safety_stock=100, daily_usage=50)
+
+    slow_combo = _combo("SLOW", price=1000, lead=8, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-SAFETY", quantity_needed=100,
+        pareto_set=[slow_combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    urgent = _coverage_result(
+        "PROD-SAFETY", "high", days_to_deadline=5.5, component_required=300,
+        component_id="COMP-SAFETY",
+    )
+
+    # Precondition: WITHOUT the draw, the reserve-respecting pool (200) plus
+    # the slow 100-unit shipment (day 8) is genuinely late against 5.5 days.
+    baseline = allocate_stock([urgent], on_hand=200, combination=slow_combo)
+    assert baseline[0].on_time is False
+    assert baseline[0].earliest_full_supply_day == 8.0
+
+    plan = run_planner(store, "COMP-SAFETY", result, [urgent], now=NOW)
+
+    decision = plan.safety_stock_decision
+    assert decision.triggered is True
+    assert decision.drawn is True
+    assert decision.draw_units == 100  # capped at the full safety_stock
+    assert decision.gap_days == 2.0  # earliest_secured_delivery(8) - days_of_coverage_on_hand(6.0)
+
+    draw_actions = plan.safety_stock_actions()
+    assert len(draw_actions) == 1
+    draw = draw_actions[0]
+    assert draw.component_id == "COMP-SAFETY"
+    assert draw.units == 100
+    assert draw.reversibility == "compensable"
+
+    # The real payoff: the order that WOULD have missed its deadline is now
+    # on time, and there is no reschedule action for it.
+    detail = plan.allocations[0]
+    assert detail.production_order_id == "PROD-SAFETY"
+    assert detail.on_time is True
+    assert detail.earliest_full_supply_day == 0.0  # covered entirely on-hand now
+    assert plan.reschedule_actions() == []
+
+    # Justification names the real numbers, not a template.
+    assert "COMP-SAFETY" in draw.justification
+    assert "2.0" in draw.justification
+    assert "100" in draw.justification
+    assert "PROD-SAFETY" in draw.justification
+
+
+def test_draw_is_capped_at_the_spec_safety_stock_field_not_a_second_definition(store):
+    """A gap bigger than safety_stock can cover: the draw stops at the
+    reserve ceiling, it does not manufacture extra units."""
+    _put_inventory(store, "COMP-CAP", usable_stock=300, safety_stock=40, daily_usage=50)
+    slow_combo = _combo("SLOW", price=1000, lead=10, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-CAP", quantity_needed=100,
+        pareto_set=[slow_combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    order = _coverage_result(
+        "PROD-CAP", "high", days_to_deadline=9.0, component_required=300,
+        component_id="COMP-CAP",
+    )
+    plan = run_planner(store, "COMP-CAP", result, [order], now=NOW)
+
+    assert plan.safety_stock_decision.draw_units == 40  # capped, not the full gap's units
+    assert plan.safety_stock_decision.draw_units <= 40  # == InventoryRecord.safety_stock
+
+
+def test_no_trigger_when_reserve_respecting_allocation_already_makes_the_deadline(store):
+    """The trigger must not fire reflexively just because a chosen
+    combination exists -- only when a real gap remains."""
+    _put_inventory(store, "COMP-FINE", usable_stock=300, safety_stock=100, daily_usage=50)
+    fast_combo = _combo("FAST", price=1000, lead=1, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-FINE", quantity_needed=100,
+        pareto_set=[fast_combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    order = _coverage_result(
+        "PROD-FINE", "high", days_to_deadline=10.0, component_required=300,
+        component_id="COMP-FINE",
+    )
+    plan = run_planner(store, "COMP-FINE", result, [order], now=NOW)
+
+    assert plan.safety_stock_decision.triggered is False
+    assert plan.safety_stock_decision.drawn is False
+    assert plan.safety_stock_actions() == []
+
+
+def test_draw_is_refused_when_it_would_worsen_another_order_sharing_the_component(store):
+    """Two orders share one component. Order A's gap would need the reserve;
+    order B has a very tight deadline that the untouched reserve currently
+    protects. Drawing to help A would flip B's on-hand-only classification
+    to a worse one -- the draw must be refused, not authorized with a
+    footnote."""
+    _put_inventory(store, "COMP-SHARED", usable_stock=200, safety_stock=150, daily_usage=50)
+    slow_combo = _combo("SLOW", price=1000, lead=6, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-SHARED", quantity_needed=100,
+        pareto_set=[slow_combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    order_a = _coverage_result(
+        "PROD-A", "high", days_to_deadline=5.0, component_required=250,
+        component_id="COMP-SHARED",
+    )
+    order_b = _coverage_result(
+        "PROD-B", "low", days_to_deadline=0.9, component_required=10,
+        component_id="COMP-SHARED",
+    )
+
+    plan = run_planner(store, "COMP-SHARED", result, [order_a, order_b], now=NOW)
+
+    decision = plan.safety_stock_decision
+    assert decision.triggered is True
+    assert decision.drawn is False
+    assert "PROD-B" in decision.worsened_orders
+    assert plan.safety_stock_actions() == []
+    assert "PROD-B" in decision.reason
+
+
+def test_justification_is_computed_not_boilerplate(store):
+    """Two different scenarios must produce two different justification
+    strings, proving the numbers are computed, not a fixed template."""
+    _put_inventory(store, "COMP-J1", usable_stock=300, safety_stock=100, daily_usage=50)
+    _put_inventory(store, "COMP-J2", usable_stock=400, safety_stock=80, daily_usage=40)
+
+    combo1 = _combo("S1", price=1000, lead=8, reliability=0.8, qty=100, moq=10, avail=100)
+    combo2 = _combo("S2", price=1000, lead=15, reliability=0.8, qty=80, moq=10, avail=80)
+
+    result1 = SolverResult(
+        computed_at=NOW, component_id="COMP-J1", quantity_needed=100,
+        pareto_set=[combo1], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    result2 = SolverResult(
+        computed_at=NOW, component_id="COMP-J2", quantity_needed=80,
+        pareto_set=[combo2], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    order1 = _coverage_result(
+        "PROD-J1", "high", days_to_deadline=5.5, component_required=300, component_id="COMP-J1"
+    )
+    order2 = _coverage_result(
+        "PROD-J2", "high", days_to_deadline=9.0, component_required=400, component_id="COMP-J2"
+    )
+
+    plan1 = run_planner(store, "COMP-J1", result1, [order1], now=NOW)
+    plan2 = run_planner(store, "COMP-J2", result2, [order2], now=NOW)
+
+    j1 = plan1.safety_stock_actions()[0].justification
+    j2 = plan2.safety_stock_actions()[0].justification
+
+    assert j1 != j2
+    assert "COMP-J1" in j1 and "COMP-J2" not in j1
+    assert "COMP-J2" in j2 and "COMP-J1" not in j2
+    assert "PROD-J1" in j1
+    assert "PROD-J2" in j2
+
+
+def test_safety_stock_draw_is_never_tagged_irreversible(store):
+    _put_inventory(store, "COMP-REV", usable_stock=300, safety_stock=100, daily_usage=50)
+    slow_combo = _combo("SLOW", price=1000, lead=8, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-REV", quantity_needed=100,
+        pareto_set=[slow_combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    order = _coverage_result(
+        "PROD-REV", "high", days_to_deadline=5.5, component_required=300,
+        component_id="COMP-REV",
+    )
+    plan = run_planner(store, "COMP-REV", result, [order], now=NOW)
+
+    draw = plan.safety_stock_actions()[0]
+    assert draw.reversibility == "compensable"
+    assert draw.reversibility != "irreversible"
+
+
+def test_safety_stock_decision_is_always_present_even_when_nothing_triggers(store):
+    """Mirrors the PollDecision/VerificationSkip pattern: the attempt is
+    always recorded, not just positive outcomes."""
+    combo = _combo("X", price=1000, lead=3, reliability=0.8, qty=100, moq=10, avail=100)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-X", quantity_needed=100,
+        pareto_set=[combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    cov = _coverage_result("PROD-A", "high", days_to_deadline=10, component_required=100)
+    plan = run_planner(store, "COMP-X", result, [cov], now=NOW)
+
+    assert plan.safety_stock_decision is not None
+    assert isinstance(plan.safety_stock_decision.reason, str)
+    assert len(plan.safety_stock_decision.reason) > 0
+
+
+def test_allocate_stock_respects_the_reserve_by_default_via_run_planner(store):
+    """Documents the real behavior change made while building 5b: routine
+    allocation no longer silently spends into the reserve. Precondition
+    check against a case where the difference is visible."""
+    _put_inventory(store, "COMP-RESV", usable_stock=300, safety_stock=100, daily_usage=50)
+    fast_combo = _combo("FAST", price=1000, lead=1, reliability=0.8, qty=50, moq=10, avail=50)
+    result = SolverResult(
+        computed_at=NOW, component_id="COMP-RESV", quantity_needed=50,
+        pareto_set=[fast_combo], rejected=[], quotes_requested=1, quotes_reused=0,
+    )
+    order = _coverage_result(
+        "PROD-RESV", "high", days_to_deadline=10.0, component_required=250,
+        component_id="COMP-RESV",
+    )
+    plan = run_planner(store, "COMP-RESV", result, [order], now=NOW)
+
+    # 200 operating on-hand + 50 incoming = 250 -- exactly enough without
+    # ever touching the reserve.
+    detail = plan.allocations[0]
+    assert detail.allocated_on_hand == 200
+    assert detail.total_allocated == 250
+    assert detail.shortfall == 0
+    assert plan.safety_stock_decision.triggered is False
+
+
+def test_on_hand_only_status_reuses_coverages_classify_not_a_reimplementation():
+    """Structural: the reclassification logic must import coverage.py's
+    _classify, not redefine the healthy/at_risk/critical threshold ladder."""
+    source = open("app/engine/planner.py", encoding="utf-8").read()
+    assert "_coverage_classify" in source
+    assert "import" in source and "_classify as _coverage_classify" in source

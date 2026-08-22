@@ -2,12 +2,72 @@
 Continuity (35%) and Recovery & Replanning (10%, PROJECT.md §2).
 
 Deterministic throughout (AGENTS.md rule 1) — no LLM anywhere in this module.
-Scope for THIS build, exactly as assigned: supplier split (picking one point
-from SOLVER's Pareto set), stock allocation (splitting the secured + on-hand
-pool across the production orders competing for it), and production
-reschedule (when allocation still leaves an order short against its
-deadline). Safety-stock consumption is item 5b, explicitly not built here —
-`Plan.actions` never contains a `safety_stock_draw` from this module.
+Covers item 5 (supplier split, stock allocation, production reschedule) AND
+item 5b (safety-stock consumption, gated on written justification) —
+ARCHITECTURE.md §9's repo layout assigns both to this one file.
+
+--------------------------------------------------------------------------
+Item 5b — safety-stock draw is a GATE on allocation, not a bonus lever
+--------------------------------------------------------------------------
+A real correction to item 5's original behavior, made while building 5b,
+disclosed here rather than silently changed: `allocate_stock` used to treat
+the FULL `usable_stock` as freely allocatable — meaning routine, unremarked
+priority-based allocation could ALREADY dip into (or through) the
+`safety_stock` reserve with no authorization at all, which made 5b's own gate
+decorative. `run_planner` now allocates from `usable_stock - safety_stock`
+(the operating buffer) BY DEFAULT; the reserve is only spent through the
+explicit, justified mechanism below. This can change `_reschedule_actions`'
+output versus item 5's original shipped behavior for the SAME inputs — see
+OPEN_ITEMS.md.
+
+Trigger and sizing (component-level; "on-hand coverage runs out" is read as
+`days_of_coverage_on_hand` — usable_stock/daily_usage hitting zero — the
+same field name coverage.py already uses, not a second definition):
+    gap_days = earliest_secured_delivery_day - days_of_coverage_on_hand
+    if gap_days > 0:
+        draw_units = min(gap_days * daily_usage, safety_stock)
+`earliest_secured_delivery_day` is the fastest-arriving member of the CHOSEN
+combination. The draw is capped at `InventoryRecord.safety_stock` — the same
+field item 2's `at_risk` classification already reads (§5.1) — reused, not
+redefined.
+
+Checking impact on other orders sharing the component (COMP-104 feeds both
+PROD-882 and PROD-914): the draw is modeled as an IMMEDIATE reduction of
+`usable_stock` by `draw_units` (a conservative, worst-case accounting
+convention — the units are treated as spent the moment the draw is
+authorized, not gradually over the gap window). Only BYSTANDER orders are
+reclassified this way — orders that receive ZERO of the chosen combination's
+incoming supply under the reserve-respecting baseline allocation (whether
+because they're already fully covered on-hand, or a higher-priority order
+consumed the whole incoming shipment first). Orders that ARE drawing on the
+same incoming shipment are excluded from this check on purpose: the
+on-hand-only lens ignores incoming supply entirely, so applying it to the
+order this draw exists to help would penalize it for the very relief it's
+receiving — a real bug caught while testing (see OPEN_ITEMS.md), not a
+hypothetical edge case. For bystanders, the on-hand-only projection (no
+inbound POs credited — deliberately consistent with what "on-hand coverage
+runs out" already means above) is compared before/after via `coverage.py`'s
+OWN `_classify` (imported, not reimplemented — one threshold ladder, one
+owner). If ANY bystander's classification would worsen (healthy→at_risk,
+healthy→critical, at_risk→critical), the draw is REFUSED,
+not executed-with-a-caveat: authorizing a trade-off between two production
+orders on the system's own initiative, unprompted, is exactly the kind of
+decision this project's escalation philosophy (AGENTS.md rule 3) reserves for
+a human, not something to wave through with a footnote. `SafetyStockDecision`
+records the attempt either way — drawn or refused — with the real numbers,
+for audit.
+
+--------------------------------------------------------------------------
+Reversibility — resolved, not left as item 5's "?"
+--------------------------------------------------------------------------
+`safety_stock_draw` is tagged **compensable**, matching `purchase_split`'s
+reasoning, not `production_reschedule`'s: once units are actually consumed
+in production, they cannot be un-consumed — there is no "put it back" action,
+same as there is no PO-cancellation feature (ARCHITECTURE.md §5). But the
+situation CAN be compensated (replenish the reserve via a later purchase,
+adjust the target going forward) — which is exactly what AGENTS.md rule 5
+means by "compensable," as distinct from "reversible" (a pure state flip with
+no physical consequence, like a schedule date).
 
 --------------------------------------------------------------------------
 The selection rule — SOLVER hands a Pareto SET, not an answer
@@ -107,21 +167,57 @@ total_price`, which solver.py computed from actual RFQ quote unit prices
 (§5.7) times allocated quantity. Nothing here re-estimates or rounds it.
 
 --------------------------------------------------------------------------
-cost_of_inaction — NOT invented
+cost_of_inaction — searched twice, genuinely absent, not invented
 --------------------------------------------------------------------------
-Checked before writing anything: this repo's docs (AGENTS.md, ARCHITECTURE.md,
-PROJECT.md, BRAND.md — the only spec material present) give no formula for
-"what does doing nothing cost." ARCHITECTURE.md §7's `340000` is an
-ILLUSTRATIVE value in an example JSON blob, not a worked calculation, and no
-penalty clause, shutdown-cost-per-day, or lost-production-value figure
-appears anywhere in this repo. Per AGENTS.md rule 7 (never invent a metric
-and display it as a finding), `Plan.cost_of_inaction` is `None` here, with
-`cost_of_inaction_note` explaining why in plain language instead of a number
-that looks authoritative. Logged in OPEN_ITEMS.md, same pattern as the
-certification-scope question from item 4: state what's missing, don't guess.
-This field is the punchline of Beat 4's "IF REJECTED:" line — an invented
-number there is a Q&A landmine, not a UI nicety, and this module will not
-manufacture the demo's punchline out of nothing.
+Searched this repo's docs (AGENTS.md, ARCHITECTURE.md, PROJECT.md, BRAND.md
+— the only spec material present) TWICE, the second pass specifically for
+penalty clauses, shutdown-cost-per-day, lost-production-value, or any
+consequence-framed (not process-framed) language — SLA terms, contract
+clauses, damages, late fees. Found none. ARCHITECTURE.md §7's `340000` is an
+ILLUSTRATIVE value in an example JSON blob, not a worked calculation. One
+directly relevant finding: ARCHITECTURE.md §5 explicitly FORBIDS "customer
+SLA tiers" as out-of-domain ("wrong domain") — the team already decided not
+to build the one mechanism (SLA penalty terms) that would most naturally
+supply this number, which is further evidence it was never meant to come
+from an invented SLA layer.
+
+Also checked whether the ONE concrete proxy formula floated during this
+build — "lost production value = units not shipped × their per-unit
+committed price" — is even computable from this schema. It is not:
+`schemas.py` has exactly five monetary fields (`PurchaseOrder.unit_price` /
+`total_value`, `SupplierRecord.unit_price`, `RFQQuote.unit_price`,
+`ApprovalCheckRequest/Response.estimated_cost`), and every one of them is
+PROCUREMENT-side — what WE pay a supplier for a component. Nothing anywhere
+represents what a FINISHED product is worth, what a customer pays, or any
+per-day/per-unit penalty. `ProductionOrder` (§5.4) has no price field at
+all. The proxy's own "if that data exists in the schema" condition is not
+met.
+
+Considered, and rejected, two fallback proxies built ONLY from data that
+does exist:
+  - Valuing the shortfall at a real, solved unit price (e.g.
+    `quantity_needed × cheapest quoted unit_price`) is CIRCULAR with
+    `total_cost` — it is the same purchase, priced the same way, so it
+    cannot answer "what happens if we DON'T buy it," only restate "what
+    buying it costs" under a different label. That would be worse than an
+    honest `None`: a number that LOOKS like an independent finding but
+    isn't one.
+  - Valuing the downtime by `shortfall_days × daily_usage × unit_price`
+    (raw material that would sit unconsumed during a stoppage) requires an
+    ASSUMED TIME HORIZON for "how long does doing nothing last" — nothing
+    in this simulation defines when an unaddressed shortage ends. Picking a
+    horizon (a week? a month?) would be exactly the kind of invented
+    number AGENTS.md rule 7 forbids, just relocated one step earlier in the
+    formula.
+
+Per AGENTS.md rule 7 (never invent a metric and display it as a finding),
+`Plan.cost_of_inaction` stays `None`, with `cost_of_inaction_note` carrying
+this full reasoning — not a one-line shrug — so it reads as a checked,
+disclosed decision, not an unexamined gap. Logged in OPEN_ITEMS.md as
+BLOCKING for the demo: this field is the punchline of Beat 4's
+"IF REJECTED:" line and the escalation brief's headline number. If the real
+problem statement (not present in this repo) turns out to define a basis,
+wire it in before the demo — do not let this ship as `None` on stage.
 
 --------------------------------------------------------------------------
 rejected_alternatives — solver's reasons, carried forward, not re-derived
@@ -145,6 +241,8 @@ from typing import Literal, Optional, Union
 from pydantic import BaseModel
 
 from app.engine.coverage import CoverageResult
+from app.engine.coverage import CoverageStatus
+from app.engine.coverage import _classify as _coverage_classify
 from app.engine.solver import DropReason, Rejection, SolverResult, SourcingCombination
 from app.environment.clock import clock
 from app.environment.seed_data import STATE, Store
@@ -164,13 +262,25 @@ SELECTION_RULE = (
 )
 
 COST_OF_INACTION_NOTE = (
-    "Not computed. AGENTS.md rule 7 forbids inventing a metric and "
-    "displaying it as a finding: none of this repo's spec material (AGENTS.md, "
-    "ARCHITECTURE.md, PROJECT.md, BRAND.md) supplies a penalty clause, "
-    "shutdown-cost-per-day, or lost-production-value figure to compute this "
-    "from. ARCHITECTURE.md §7's 340000 is an illustrative example value, not "
-    "a worked calculation. Logged in OPEN_ITEMS.md — resolve there before "
-    "this field is filled in, not by guessing a number here."
+    "Not computed -- searched twice, genuinely absent, not an oversight. "
+    "AGENTS.md rule 7 forbids inventing a metric and displaying it as a "
+    "finding: this repo's spec material (AGENTS.md, ARCHITECTURE.md, "
+    "PROJECT.md, BRAND.md) supplies no penalty clause, shutdown-cost-per-day, "
+    "or lost-production-value figure. The one concrete fallback considered "
+    "-- units short x their committed sale price -- has no data to compute "
+    "from: every monetary field in this schema (PurchaseOrder.unit_price, "
+    "SupplierRecord.unit_price, RFQQuote.unit_price, "
+    "ApprovalCheckRequest.estimated_cost) is a PROCUREMENT cost, and "
+    "ProductionOrder carries no price field at all. Two further fallbacks "
+    "built only from data that exists were rejected too: pricing the "
+    "shortfall at a real quote is circular with total_cost (same purchase, "
+    "relabeled); pricing downtime by day requires an invented time horizon "
+    "for 'how long does inaction last,' which is the same rule-7 violation "
+    "one step removed. ARCHITECTURE.md §7's 340000 is an illustrative "
+    "example value, not a worked calculation. Logged in OPEN_ITEMS.md as "
+    "BLOCKING for the demo -- this is Beat 4's 'IF REJECTED:' punchline; "
+    "resolve there if the real problem statement supplies a basis, not by "
+    "guessing a number here."
 )
 
 
@@ -202,7 +312,35 @@ class ProductionRescheduleAction(BaseModel):
     justification: str
 
 
-PlanAction = Union[PurchaseSplitAction, ProductionRescheduleAction]
+class SafetyStockDrawAction(BaseModel):
+    """Item 5b. `days` matches ARCHITECTURE.md §7's illustrative field name;
+    `units` is the actual quantity (auditable, capped at
+    `InventoryRecord.safety_stock`). Only ever produced when the draw was
+    authorized — see `SafetyStockDecision` for the attempt either way."""
+
+    type: Literal["safety_stock_draw"] = "safety_stock_draw"
+    component_id: str
+    days: float
+    units: int
+    reversibility: Literal["compensable"] = "compensable"
+    justification: str
+
+
+PlanAction = Union[PurchaseSplitAction, ProductionRescheduleAction, SafetyStockDrawAction]
+
+
+class SafetyStockDecision(BaseModel):
+    """The safety-stock question, answered either way, for audit — mirrors
+    the PollDecision / VerificationSkip pattern from items 2b/3: record the
+    attempt, not just a positive outcome."""
+
+    component_id: str
+    triggered: bool  # did on-hand coverage run out before relief at all
+    gap_days: Optional[float] = None
+    drawn: bool
+    draw_units: int = 0
+    reason: str
+    worsened_orders: list[str] = []  # non-empty only when drawn=False because of them
 
 
 class AllocationDetail(BaseModel):
@@ -251,6 +389,7 @@ class Plan(BaseModel):
     actions: list[PlanAction]
     allocations: list[AllocationDetail]
     rejected_alternatives: list[RejectedAlternative]
+    safety_stock_decision: SafetyStockDecision
     total_cost: float
     cost_of_inaction: Optional[float]
     cost_of_inaction_note: str
@@ -260,6 +399,9 @@ class Plan(BaseModel):
 
     def reschedule_actions(self) -> list[ProductionRescheduleAction]:
         return [a for a in self.actions if isinstance(a, ProductionRescheduleAction)]
+
+    def safety_stock_actions(self) -> list[SafetyStockDrawAction]:
+        return [a for a in self.actions if isinstance(a, SafetyStockDrawAction)]
 
 
 # ==========================================================================
@@ -427,6 +569,151 @@ def _reschedule_actions(allocations: list[AllocationDetail]) -> list[ProductionR
 
 
 # ==========================================================================
+# Stage 2b — safety-stock draw, gated on written justification (item 5b)
+# ==========================================================================
+
+_STATUS_RANK: dict[CoverageStatus, int] = {"healthy": 0, "at_risk": 1, "critical": 2}
+
+
+def _on_hand_only_status(
+    usable_stock: float, safety_stock: int, daily_usage: int, days_to_deadline: float
+) -> CoverageStatus:
+    """Classify using ONLY on-hand stock — no inbound credited — via
+    coverage.py's own `_classify` (imported, not reimplemented). Deliberately
+    narrower than a CoverageResult's arrival-credited status: item 5b is
+    specifically about the window BEFORE the chosen combination's supply
+    arrives, where inbound credit doesn't apply yet."""
+    if daily_usage <= 0:
+        return "healthy"
+    days_of_coverage = usable_stock / daily_usage
+    days_to_safety_breach = (
+        0.0 if usable_stock <= safety_stock else (usable_stock - safety_stock) / daily_usage
+    )
+    status, _reason = _coverage_classify(days_of_coverage, days_to_safety_breach, days_to_deadline)
+    return status
+
+
+def _safety_stock_decision(
+    component_id: str,
+    coverage_results: list[CoverageResult],
+    chosen: SourcingCombination,
+    usable_stock: int,
+    safety_stock: int,
+    daily_usage: int,
+    baseline_allocations: list[AllocationDetail],
+) -> SafetyStockDecision:
+    """Item 5b. See the module docstring's "Item 5b" section for the full
+    trigger / sizing / other-order-impact reasoning this implements."""
+    if not baseline_allocations or all(d.on_time for d in baseline_allocations):
+        return SafetyStockDecision(
+            component_id=component_id,
+            triggered=False,
+            drawn=False,
+            reason=(
+                "On-hand coverage (respecting the safety_stock reserve) "
+                "already gets every order to its deadline — no gap to bridge."
+            ),
+        )
+
+    days_of_coverage_on_hand = usable_stock / daily_usage if daily_usage > 0 else math.inf
+    earliest_secured_delivery_day = min(m.lead_time_days for m in chosen.members)
+    gap_days = earliest_secured_delivery_day - days_of_coverage_on_hand
+
+    if daily_usage <= 0 or gap_days <= 0:
+        return SafetyStockDecision(
+            component_id=component_id,
+            triggered=False,
+            drawn=False,
+            reason=(
+                f"{component_id}: on-hand coverage lasts until day "
+                f"{days_of_coverage_on_hand:.1f}, at or before the earliest "
+                f"secured delivery on day {earliest_secured_delivery_day} — no "
+                "physical stockout gap for safety stock to bridge. Any "
+                "reschedule here is a unit-allocation timing issue, not a "
+                "stockout risk."
+            ),
+        )
+
+    draw_units = min(math.ceil(gap_days * daily_usage), safety_stock)
+    if draw_units <= 0:
+        return SafetyStockDecision(
+            component_id=component_id,
+            triggered=True,
+            gap_days=round(gap_days, 1),
+            drawn=False,
+            reason=(
+                f"{component_id}: a {gap_days:.1f}-day physical gap exists "
+                f"before the earliest secured delivery, but safety_stock is "
+                f"{safety_stock} — nothing available to draw."
+            ),
+        )
+
+    usable_stock_after = usable_stock - draw_units
+    # Orders already drawing on the SAME chosen combination's incoming supply
+    # are the ones this draw exists to help — the on-hand-only lens ignores
+    # incoming supply entirely, so applying it to them would penalize the
+    # beneficiary for benefiting. Only genuine bystanders — orders that get
+    # ZERO of the incoming shipment under the reserve-respecting baseline,
+    # whether because they're already fully on-hand-covered or because a
+    # higher-priority order consumed the whole incoming pool first — have a
+    # margin that is purely being spent on someone else's behalf, and are
+    # what this check is actually for.
+    bystanders = {
+        d.production_order_id for d in baseline_allocations if d.allocated_incoming == 0
+    }
+    worsened: list[str] = []
+    for result in coverage_results:
+        if result.production_order_id not in bystanders:
+            continue
+        before_status = _on_hand_only_status(
+            usable_stock, safety_stock, daily_usage, result.days_to_deadline
+        )
+        after_status = _on_hand_only_status(
+            usable_stock_after, safety_stock, daily_usage, result.days_to_deadline
+        )
+        if _STATUS_RANK[after_status] > _STATUS_RANK[before_status]:
+            worsened.append(result.production_order_id)
+
+    if worsened:
+        return SafetyStockDecision(
+            component_id=component_id,
+            triggered=True,
+            gap_days=round(gap_days, 1),
+            drawn=False,
+            draw_units=0,
+            reason=(
+                f"{component_id}: a {gap_days:.1f}-day physical gap exists "
+                f"before relief arrives, and drawing {draw_units} of "
+                f"{safety_stock} safety-stock units would bridge it, but it "
+                f"would also worsen {', '.join(sorted(worsened))}'s own "
+                "on-hand-only classification — refused rather than authorized "
+                "with a footnote (see module docstring's 'Item 5b' section)."
+            ),
+            worsened_orders=sorted(worsened),
+        )
+
+    covered_days = min(gap_days, draw_units / daily_usage)
+    affected = sorted({r.production_order_id for r in coverage_results})
+    return SafetyStockDecision(
+        component_id=component_id,
+        triggered=True,
+        gap_days=round(gap_days, 1),
+        drawn=True,
+        draw_units=draw_units,
+        reason=(
+            f"{component_id}: on-hand coverage runs out at day "
+            f"{days_of_coverage_on_hand:.1f} ({usable_stock} units at "
+            f"{daily_usage}/day), {gap_days:.1f} day(s) before the earliest "
+            f"secured delivery arrives on day {earliest_secured_delivery_day}. "
+            f"Drawing {draw_units} of {safety_stock} safety-stock units covers "
+            f"{covered_days:.1f} of those {gap_days:.1f} day(s). Affects: "
+            f"{', '.join(affected)}. No other order's on-hand-only "
+            "classification worsens as a result."
+        ),
+    )
+
+
+# ==========================================================================
 # Stage 4 — rejected alternatives, saved figure filled in
 # ==========================================================================
 
@@ -506,9 +793,46 @@ def run_planner(
     chosen = _select_combination(solver_result.pareto_set)
 
     inventory = store.get_inventory(component_id)
-    on_hand = inventory.usable_stock if inventory is not None else 0
+    usable_stock = inventory.usable_stock if inventory is not None else 0
+    safety_stock = inventory.safety_stock if inventory is not None else 0
+    daily_usage = inventory.daily_usage if inventory is not None else 0
 
-    allocations = allocate_stock(coverage_results, on_hand, chosen)
+    # Item 5b: allocation draws from the OPERATING buffer by default, not the
+    # full usable_stock — the reserve is only spent through the explicit,
+    # justified mechanism below. See the module docstring's "Item 5b" section.
+    on_hand_operating = max(0, usable_stock - safety_stock)
+    baseline_allocations = allocate_stock(coverage_results, on_hand_operating, chosen)
+
+    safety_stock_decision = _safety_stock_decision(
+        component_id,
+        coverage_results,
+        chosen,
+        usable_stock,
+        safety_stock,
+        daily_usage,
+        baseline_allocations,
+    )
+
+    safety_stock_action: list[SafetyStockDrawAction] = []
+    if safety_stock_decision.drawn:
+        on_hand_final = on_hand_operating + safety_stock_decision.draw_units
+        allocations = allocate_stock(coverage_results, on_hand_final, chosen)
+        covered_days = (
+            min(safety_stock_decision.gap_days, safety_stock_decision.draw_units / daily_usage)
+            if daily_usage > 0 and safety_stock_decision.gap_days is not None
+            else 0.0
+        )
+        safety_stock_action.append(
+            SafetyStockDrawAction(
+                component_id=component_id,
+                days=round(covered_days, 1),
+                units=safety_stock_decision.draw_units,
+                justification=safety_stock_decision.reason,
+            )
+        )
+    else:
+        allocations = baseline_allocations
+
     reschedules = _reschedule_actions(allocations)
 
     purchase_actions: list[PurchaseSplitAction] = [
@@ -535,9 +859,10 @@ def run_planner(
         computed_at=now,
         selection_rule=SELECTION_RULE,
         chosen_combination=chosen,
-        actions=[*purchase_actions, *reschedules],
+        actions=[*purchase_actions, *safety_stock_action, *reschedules],
         allocations=allocations,
         rejected_alternatives=rejected,
+        safety_stock_decision=safety_stock_decision,
         total_cost=chosen.total_price,
         cost_of_inaction=None,
         cost_of_inaction_note=COST_OF_INACTION_NOTE,

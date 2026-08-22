@@ -104,7 +104,7 @@ Everything above the cut-line works end to end before anything below it starts.
 | 3 | Claim verification vs tracking; provenance-only reliability update, exponentially weighted `B(t+1) = (1−λ)B(t) + λs(t+1)`; probe only when a decision depends on the claim | 15% | 2h |
 | 4 | Hard pre-filter (cert + budget) → Pareto solver; quote expiry (`quote_valid_hours: 6`) as a real constraint | 20% | ✅ built |
 | 5 | Multi-action recovery plans: supplier split + stock allocation + **production reschedule** (not safety stock — that's 5b) | 35% | ✅ built |
-| 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | 30m |
+| 5b | Safety-stock consumption as a solver action, gated on written justification | 35% + 20% | ✅ built |
 | 6 | Hard escalation ratchet + decision brief: cost delta, alternatives, **cost of no action**, **what would have to be true for this to be wrong** | 20% | 1.5h |
 | 7 | Provenance graph — audit trail and assumption ledger as ONE object (Support / Depend-on / Contradict / Invalidate / Trigger / Update) + regret-scored rejected alternatives + model version per decision | 10% + 20% | 2h |
 | | **── CUT-LINE. At hour 12, ship exactly the above. ──** | | |

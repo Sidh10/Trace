@@ -15,34 +15,117 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
       earliest invalidated stage" is the natural place for this, not a change
       to `coverage.py`'s `dependable_inbound()` filter itself.
 
-## Needs a call — cost_of_inaction has no basis in this repo's docs
+## REQUIRED for item 6 — nothing currently catches a plan that misses its deadline
 
-- [ ] `app/engine/planner.py`'s `Plan.cost_of_inaction` is `None` (with
-      `cost_of_inaction_note` explaining why) because AGENTS.md,
-      ARCHITECTURE.md, PROJECT.md, and BRAND.md — the only spec material in
-      this repo — give no formula: no penalty clause, no shutdown-cost-per-
-      day, no lost-production-value figure. ARCHITECTURE.md §7's `340000` is
-      an illustrative example value in a JSON blob, not a worked
-      calculation. **This is PROJECT.md §4 Beat 4's `IF REJECTED:` punchline
-      and the "Leave-behind" escalation brief's headline number** — if the
-      real problem statement supplies a basis (a penalty clause, a per-day
-      shutdown cost), find it and wire it in before the demo; do not let
-      this ship as `None` on stage. Whoever has the literal problem
-      statement text should resolve this first, before item 6 (RATCHET,
-      which surfaces this in its decision brief) is built.
+- [ ] **Confirmed gap, not a hypothesis.**
+      `tests/test_planner.py::test_ADVERSARIAL_reliability_first_choice_can_silently_blow_a_deadline_reschedule_would_have_avoided`
+      constructs a real Pareto set — SUP-RELIABLE (0.95 reliability, 20-day
+      lead) vs SUP-RISKY (0.5 reliability, 2-day lead) — against a
+      HIGH-priority order with a 5-day deadline. `SELECTION_RULE` (reliability
+      first, as designed and already flagged above) picks SUP-RELIABLE.
+      `allocate_stock` / `_reschedule_actions` compute the consequence
+      correctly and honestly: `delay_days=15` — the order lands 3x past its
+      original 5-day deadline. **`run_planner` returns this as a normal,
+      well-formed `Plan`, indistinguishable in shape from any other plan.**
+      Nothing anywhere — not `Plan`, not `planner.py`, not any other built
+      component — flags that this specific reschedule might be unacceptable,
+      or that a REJECTED alternative (SUP-RISKY) would have hit the deadline
+      cleanly. `RejectedAlternative.regret` for SUP-RISKY says only "lost on
+      reliability_score" — it never mentions that picking it would have made
+      the deadline the chosen option missed.
+- [ ] **This is AGENTS.md rule 3, already named, not yet implemented
+      anywhere:** *"Cost above threshold, no supplier meets deadline, or
+      quality risk → escalate."* "No supplier meets deadline" is one of
+      exactly three hard, spec-mandated escalation triggers — item 6
+      (RATCHET) is where this belongs (item 5/PLANNER's job is to build the
+      best plan it can from what SOLVER hands it, not to judge whether that
+      plan is good enough to execute autonomously — that judgment is
+      RATCHET's entire reason to exist). **Explicit requirement for item 6:**
+      before executing (or instead of silently executing) ANY plan
+      containing a `production_reschedule` action, check whether
+      `delay_days` represents a deadline miss serious enough to escalate
+      rather than execute silently — at minimum, whenever the CHOSEN
+      combination missed a deadline that a REJECTED, otherwise-valid
+      alternative would have met. This is not optional polish; without it,
+      a plan can silently reschedule a high-priority order by weeks and ship
+      it as if it were routine.
+- [ ] Not fixed in `planner.py` deliberately — item 5's job is to build the
+      best plan from what SOLVER hands it and report the real consequence
+      (which it now does, correctly); judging whether that consequence is
+      acceptable to execute without a human is item 6's job specifically.
+      Fixing it here would mean PLANNER quietly deciding execute-vs-escalate,
+      which ARCHITECTURE.md §3's own diagram and this session's item 5
+      instructions both reserve for RATCHET alone.
+
+## BLOCKING for the demo — cost_of_inaction, searched twice, genuinely absent
+
+- [ ] `app/engine/planner.py`'s `Plan.cost_of_inaction` is `None`. Searched
+      TWICE (re-checked specifically for SLA terms, contract clauses,
+      damages, late fees — anything consequence-framed rather than
+      process-framed) — AGENTS.md, ARCHITECTURE.md, PROJECT.md, BRAND.md
+      give no formula. ARCHITECTURE.md §5 explicitly forbids "customer SLA
+      tiers" as out-of-domain, which is further evidence, not just absence.
+      Also tried the ONE concrete fallback proxy floated during this build
+      ("units short × their committed sale price") and confirmed it has NO
+      data to compute from: every monetary field in `schemas.py`
+      (`PurchaseOrder`/`SupplierRecord`/`RFQQuote.unit_price`,
+      `ApprovalCheckRequest.estimated_cost`) is a PROCUREMENT cost;
+      `ProductionOrder` carries no price field at all. Two further fallbacks
+      built only from data that DOES exist were considered and rejected:
+      pricing the shortfall at a real quote is circular with `total_cost`
+      (same purchase, relabeled, not independent information); pricing
+      downtime by day requires inventing a time horizon for "how long does
+      inaction last," which is the same rule-7 violation one step removed.
+      Full reasoning in `app/engine/planner.py`'s module docstring and
+      `COST_OF_INACTION_NOTE` (the actual runtime-visible note, not just a
+      code comment).
+      **This is PROJECT.md §4 Beat 4's `IF REJECTED:` punchline and the
+      "Leave-behind" escalation brief's headline number — it cannot ship as
+      `None` on stage.** Whoever has the literal problem statement text
+      needs to find a real basis (penalty clause, per-day shutdown cost,
+      lost-revenue figure) and wire it into `planner.py` before the demo, or
+      the team needs to decide how Beat 4 and the leave-behind brief handle
+      an admittedly-unknown cost of inaction on stage. Resolve before item 6
+      (RATCHET) surfaces this in its decision brief.
 
 ## Needs a call — Plan shape: reversibility moved per-action
 
 - [ ] ARCHITECTURE.md §7's `Plan` shape previously had ONE `reversibility`
       field for the whole plan. Item 5 tags reversibility on EACH action
       instead (`purchase_split` -> `compensable`, `production_reschedule`
-      -> `reversible`) — see `app/engine/planner.py`'s module docstring for
-      why. ARCHITECTURE.md §7 is updated to match. Item 6 (RATCHET) is the
-      consuming component §7 says should agree a shape change; confirm this
-      works for it, or say what needs to change.
-- [ ] `safety_stock_draw` (item 5b, not built here) needs its OWN
-      reversibility tag decided when it's built — `?` in ARCHITECTURE.md
-      §7's example, deliberately not guessed at here.
+      -> `reversible`, `safety_stock_draw` -> `compensable` — resolved,
+      item 5b's own "?" is now filled in) — see `app/engine/planner.py`'s
+      module docstring for the reasoning on all three. ARCHITECTURE.md §7 is
+      updated to match. Item 6 (RATCHET) is the consuming component §7 says
+      should agree a shape change; confirm this works for it, or say what
+      needs to change.
+
+## Owed by whoever touches item 5's allocation logic again — a real behavior change
+
+- [ ] **`allocate_stock`'s default on-hand pool changed while building item
+      5b.** It used to allocate from the FULL `usable_stock` (silently
+      dipping into `safety_stock` with no authorization at all, discovered
+      while building 5b — this made 5b's gate decorative unless fixed).
+      `run_planner` now allocates from `usable_stock - safety_stock` by
+      default; the reserve is only spent through `_safety_stock_decision`'s
+      explicit, justified mechanism. Confirmed via
+      `tests/test_planner.py::test_smoke_against_the_real_current_state`
+      that this does NOT change the real current-dataset outcome (both
+      orders still land on time, item 5b's trigger correctly does not fire)
+      — but this IS a disclosed behavior change from item 5's originally
+      shipped code, not purely additive. If anything downstream assumed the
+      old (unreserved) behavior, it needs to be re-checked.
+- [ ] **A real bug caught while testing item 5b, fixed before it shipped:**
+      the first version of the "does this draw hurt another order" check
+      applied the on-hand-only reclassification to EVERY order sharing the
+      component, including the one the draw exists to help — which
+      penalized that order for benefiting from its own rescue (the on-hand-
+      only lens ignores incoming supply entirely, so it looked like the
+      beneficiary's situation got worse when it actually got dramatically
+      better). Fixed by excluding "bystander" orders only — those receiving
+      ZERO of the chosen combination's incoming supply under the baseline
+      allocation. Recorded here in case a similar mistake gets reintroduced
+      by a future change to `allocate_stock` or `_safety_stock_decision`.
 
 ## Needs a call — selection rule puts reliability ahead of lead time
 
