@@ -336,14 +336,16 @@ RejectionReason = Union[DropReason, Literal["not_selected", "deadline_infeasible
 
 
 class ProductionOrderAtRisk(BaseModel):
-    """One production order this plan does NOT get to its own deadline.
+    """One production order this plan does NOT get to its own deadline under inaction.
     See the module docstring's "cost_of_inaction" section for exactly how
-    `units_unbuilt` / `deadline_missed_by_days` are derived."""
+    `units_unbuilt` / `fulfilled` / `inaction_impact` are derived."""
 
     production_order_id: str
     priority: Literal["low", "medium", "high"]
     units_unbuilt: int
+    fulfilled: bool = False
     deadline_missed_by_days: Optional[int] = None
+    inaction_impact: str = "never_fulfilled_without_new_supply"
 
 
 class CostOfInaction(BaseModel):
@@ -903,7 +905,9 @@ def _compute_cost_of_inaction(
             production_order_id=detail.production_order_id,
             priority=detail.priority,
             units_unbuilt=max(0, detail.component_required - detail.allocated_on_hand),
+            fulfilled=False,
             deadline_missed_by_days=None,
+            inaction_impact=f"unfulfilled_indefinitely ({detail.component_required - detail.allocated_on_hand} units short)",
         )
         for detail in inaction_allocations
         if not detail.on_time

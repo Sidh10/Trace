@@ -1,0 +1,187 @@
+{
+  "plan_id": "PLAN-0002",
+  "component_id": "COMP-104",
+  "computed_at": "2026-09-01T08:00:00Z",
+  "decision": "escalate",
+  "triggers_fired": [
+    "cost_above_threshold"
+  ],
+  "approval_threshold": 150000.0,
+  "total_cost": 123614.0,
+  "cost_delta_vs_baseline": null,
+  "cost_increase_vs_baseline_pct": null,
+  "chosen_plan": {
+    "plan_id": "PLAN-0002",
+    "component_id": "COMP-104",
+    "computed_at": "2026-09-01T08:00:00Z",
+    "selection_rule": "Select the Pareto candidate with the highest reliability_score; ties broken by the shortest lead_time_days; further ties broken by the lowest total_price.",
+    "chosen_combination": {
+      "members": [
+        {
+          "supplier_id": "SUP-37",
+          "unit_price": 123.82,
+          "quantity": 450,
+          "available_quantity": 450,
+          "lead_time_days": 6,
+          "reliability_score": 0.86,
+          "quality_score": 0.89,
+          "min_order_quantity": 200
+        },
+        {
+          "supplier_id": "SUP-42",
+          "unit_price": 135.79,
+          "quantity": 500,
+          "available_quantity": 700,
+          "lead_time_days": 4,
+          "reliability_score": 0.81,
+          "quality_score": 0.94,
+          "min_order_quantity": 300
+        }
+      ],
+      "quantity_needed": 950,
+      "quantity_allocated": 950,
+      "total_price": 123614.0,
+      "lead_time_days": 6,
+      "reliability_score": 0.81,
+      "quality_score": 0.89,
+      "total_min_order_quantity": 500,
+      "total_available_quantity": 1150
+    },
+    "actions": [
+      {
+        "type": "purchase_split",
+        "supplier_id": "SUP-37",
+        "qty": 450,
+        "unit_price": 123.82,
+        "lead_time_days": 6,
+        "reversibility": "compensable",
+        "note": "450 units @ 123.82/unit from SUP-37, 6-day lead time."
+      },
+      {
+        "type": "purchase_split",
+        "supplier_id": "SUP-42",
+        "qty": 500,
+        "unit_price": 135.79,
+        "lead_time_days": 4,
+        "reversibility": "compensable",
+        "note": "500 units @ 135.79/unit from SUP-42, 4-day lead time."
+      }
+    ],
+    "allocations": [
+      {
+        "production_order_id": "PROD-882",
+        "priority": "high",
+        "component_required": 700,
+        "allocated_on_hand": 240,
+        "allocated_incoming": 460,
+        "total_allocated": 700,
+        "shortfall": 0,
+        "earliest_full_supply_day": 4.0,
+        "days_to_deadline": 4.7,
+        "on_time": true
+      },
+      {
+        "production_order_id": "PROD-914",
+        "priority": "low",
+        "component_required": 250,
+        "allocated_on_hand": 0,
+        "allocated_incoming": 250,
+        "total_allocated": 250,
+        "shortfall": 0,
+        "earliest_full_supply_day": 6.0,
+        "days_to_deadline": 8.7,
+        "on_time": true
+      }
+    ],
+    "rejected_alternatives": [
+      {
+        "option": "SUP-18",
+        "saved": -21014.0,
+        "regret": "SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call.",
+        "reason": "quality_below_threshold"
+      },
+      {
+        "option": "SUP-21",
+        "saved": -64614.0,
+        "regret": "SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) \u2014 dropped before spending an RFQ call.",
+        "reason": "budget_infeasible"
+      }
+    ],
+    "safety_stock_decision": {
+      "component_id": "COMP-104",
+      "triggered": false,
+      "gap_days": null,
+      "drawn": false,
+      "draw_units": 0,
+      "reason": "On-hand coverage (respecting the safety_stock reserve) already gets every order to its deadline \u2014 no gap to bridge.",
+      "worsened_orders": []
+    },
+    "deadline_feasible": true,
+    "total_cost": 123614.0,
+    "cost_of_inaction": {
+      "production_orders_at_risk": [
+        {
+          "production_order_id": "PROD-882",
+          "priority": "high",
+          "units_unbuilt": 460,
+          "fulfilled": false,
+          "deadline_missed_by_days": null,
+          "inaction_impact": "unfulfilled_indefinitely (460 units short)"
+        },
+        {
+          "production_order_id": "PROD-914",
+          "priority": "low",
+          "units_unbuilt": 250,
+          "fulfilled": false,
+          "deadline_missed_by_days": null,
+          "inaction_impact": "unfulfilled_indefinitely (250 units short)"
+        }
+      ],
+      "cost_increase_vs_baseline_pct": null,
+      "baseline_total_cost": null,
+      "baseline_note": "No delayed purchase order found for this component -- there is no identifiable pre-disruption baseline price to compare against, so cost_increase_vs_baseline_pct is not computed. Not the same as inventing one (AGENTS.md rule 7): a percentage needs a real prior price to be a percentage OF; absent a disrupted PO, there is nothing that claims a disruption happened to this component at all."
+    }
+  },
+  "rejected_alternatives": [
+    {
+      "option": "SUP-18",
+      "saved": -21014.0,
+      "regret": "SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call.",
+      "reason": "quality_below_threshold"
+    },
+    {
+      "option": "SUP-21",
+      "saved": -64614.0,
+      "regret": "SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) \u2014 dropped before spending an RFQ call.",
+      "reason": "budget_infeasible"
+    }
+  ],
+  "cost_of_inaction": {
+    "production_orders_at_risk": [
+      {
+        "production_order_id": "PROD-882",
+        "priority": "high",
+        "units_unbuilt": 460,
+        "fulfilled": false,
+        "deadline_missed_by_days": null,
+        "inaction_impact": "unfulfilled_indefinitely (460 units short)"
+      },
+      {
+        "production_order_id": "PROD-914",
+        "priority": "low",
+        "units_unbuilt": 250,
+        "fulfilled": false,
+        "deadline_missed_by_days": null,
+        "inaction_impact": "unfulfilled_indefinitely (250 units short)"
+      }
+    ],
+    "cost_increase_vs_baseline_pct": null,
+    "baseline_total_cost": null,
+    "baseline_note": "No delayed purchase order found for this component -- there is no identifiable pre-disruption baseline price to compare against, so cost_increase_vs_baseline_pct is not computed. Not the same as inventing one (AGENTS.md rule 7): a percentage needs a real prior price to be a percentage OF; absent a disrupted PO, there is nothing that claims a disruption happened to this component at all."
+  },
+  "falsification_line": "This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.",
+  "narration": "DECISION: ESCALATE \u2014 COMP-104\n\nTriggers fired: cost_above_threshold\n\nChosen plan PLAN-0002: SUP-37 (450) + SUP-42 (500), total_cost 123614.00 (approval threshold 150000).\nCost delta vs baseline: not available (no disrupted PO identified).\nProduction orders at risk if this plan is not executed:\n  - PROD-882 (high priority): 460 units unbuilt, never fully supplied by this plan.\n  - PROD-914 (low priority): 250 units unbuilt, never fully supplied by this plan.\nRejected alternatives:\n  - SUP-18 [quality_below_threshold]: saved -21014.00 \u2014 SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call.\n  - SUP-21 [budget_infeasible]: saved -64614.00 \u2014 SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) \u2014 dropped before spending an RFQ call.\n\nFalsification: This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.",
+  "narrated_by": "deterministic",
+  "model_version": "deterministic",
+  "approval_checks_made": 1
+}

@@ -1,0 +1,543 @@
+{
+  "built_at": "2026-09-01T08:00:00Z",
+  "edges": [
+    {
+      "edge_id": "PROV-0001",
+      "relation": "Depend-on",
+      "from_node": "production_order:PROD-902",
+      "to_node": "po:PO-7819",
+      "produced_by_module": "coverage",
+      "input_record_ids": [
+        "PROD-902",
+        "PO-7819",
+        "COMP-122"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "PROD-902's coverage depends on PO-7819: days_of_coverage 14.1 vs on-hand floor 10.5, against a 10.7-day deadline."
+    },
+    {
+      "edge_id": "PROV-0002",
+      "relation": "Depend-on",
+      "from_node": "production_order:PROD-903",
+      "to_node": "po:PO-7819",
+      "produced_by_module": "coverage",
+      "input_record_ids": [
+        "PROD-903",
+        "PO-7819",
+        "COMP-122"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "PROD-903's coverage depends on PO-7819: days_of_coverage 14.1 vs on-hand floor 10.5, against a 10.7-day deadline."
+    },
+    {
+      "edge_id": "PROV-0003",
+      "relation": "Contradict",
+      "from_node": "warehouse:COMP-104",
+      "to_node": "erp:COMP-104",
+      "produced_by_module": "coverage",
+      "input_record_ids": [
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "ERP current_stock overstates issuable stock by 30 units. Coverage computed on warehouse usable_stock (390), not on the ERP figure (420). Not reconciled. Decision-changing: the ERP figure reads at_risk, the warehouse figure reads critical."
+    },
+    {
+      "edge_id": "PROV-0004",
+      "relation": "Contradict",
+      "from_node": "warehouse:COMP-105",
+      "to_node": "erp:COMP-105",
+      "produced_by_module": "coverage",
+      "input_record_ids": [
+        "COMP-105"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "ERP current_stock overstates issuable stock by 4 units. Coverage computed on warehouse usable_stock (1950), not on the ERP figure (1954). Not reconciled."
+    },
+    {
+      "edge_id": "PROV-0005",
+      "relation": "Contradict",
+      "from_node": "warehouse:COMP-108",
+      "to_node": "erp:COMP-108",
+      "produced_by_module": "coverage",
+      "input_record_ids": [
+        "COMP-108"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "ERP current_stock overstates issuable stock by 17 units. Coverage computed on warehouse usable_stock (540), not on the ERP figure (557). Not reconciled."
+    },
+    {
+      "edge_id": "PROV-0006",
+      "relation": "Contradict",
+      "from_node": "warehouse:COMP-122",
+      "to_node": "erp:COMP-122",
+      "produced_by_module": "coverage",
+      "input_record_ids": [
+        "COMP-122"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "ERP current_stock overstates issuable stock by 36 units. Coverage computed on warehouse usable_stock (420), not on the ERP figure (456). Not reconciled."
+    },
+    {
+      "edge_id": "PROV-0007",
+      "relation": "Update",
+      "from_node": "poll:PO-7819",
+      "to_node": "po:PO-7819",
+      "produced_by_module": "monitor",
+      "input_record_ids": [
+        "PO-7819",
+        "COMP-122"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "Polled PO-7819: tracking 'not_shipped' is consistent with PO status 'pending'. Checked and clean \u2014 recorded so this is not mistaken for 'never checked'."
+    },
+    {
+      "edge_id": "PROV-0008",
+      "relation": "Support",
+      "from_node": "supplier:SUP-18",
+      "to_node": "rejection:SUP-18",
+      "produced_by_module": "solver",
+      "input_record_ids": [
+        "SUP-18",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "[quality_below_threshold] SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call."
+    },
+    {
+      "edge_id": "PROV-0009",
+      "relation": "Trigger",
+      "from_node": "event:EVT-0001",
+      "to_node": "plan:PLAN-0001",
+      "produced_by_module": "planner",
+      "input_record_ids": [
+        "EVT-0001",
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "EVT-0001 (coverage_breach, detected via erp_check) is a disruption on COMP-104 that PLAN-0001 was built to answer."
+    },
+    {
+      "edge_id": "PROV-0010",
+      "relation": "Trigger",
+      "from_node": "event:EVT-0002",
+      "to_node": "plan:PLAN-0001",
+      "produced_by_module": "planner",
+      "input_record_ids": [
+        "EVT-0002",
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "EVT-0002 (coverage_breach, detected via erp_check) is a disruption on COMP-104 that PLAN-0001 was built to answer."
+    },
+    {
+      "edge_id": "PROV-0011",
+      "relation": "Trigger",
+      "from_node": "event:EVT-0003",
+      "to_node": "plan:PLAN-0001",
+      "produced_by_module": "planner",
+      "input_record_ids": [
+        "EVT-0003",
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "EVT-0003 (inventory_mismatch, detected via erp_check) is a disruption on COMP-104 that PLAN-0001 was built to answer."
+    },
+    {
+      "edge_id": "PROV-0012",
+      "relation": "Depend-on",
+      "from_node": "plan:PLAN-0001",
+      "to_node": "combination:SUP-37 (450) + SUP-42 (500)",
+      "produced_by_module": "planner",
+      "input_record_ids": [
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "PLAN-0001 sources from SUP-37 (450) + SUP-42 (500): total_cost 123674.0, lead 6d, reliability 0.81."
+    },
+    {
+      "edge_id": "PROV-0013",
+      "relation": "Support",
+      "from_node": "plan:PLAN-0001",
+      "to_node": "brief:PLAN-0001",
+      "produced_by_module": "ratchet",
+      "input_record_ids": [
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "PLAN-0001 is the plan this decision was taken on: total_cost 123674.0 against threshold 150000.0."
+    },
+    {
+      "edge_id": "PROV-0014",
+      "relation": "Update",
+      "from_node": "ratchet_check:COMP-104",
+      "to_node": "brief:PLAN-0001",
+      "produced_by_module": "ratchet",
+      "input_record_ids": [
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "All three hard triggers evaluated (cost_above_threshold, no_feasible_deadline_plan, quality_risk); none fired, so the decision is 'execute'. Recorded explicitly so that no trigger firing is never ambiguous with never having checked."
+    },
+    {
+      "edge_id": "PROV-0015",
+      "relation": "Update",
+      "from_node": "plan:PLAN-0001",
+      "to_node": "erp_write:ERP-0001",
+      "produced_by_module": "ratchet",
+      "input_record_ids": [
+        "PLAN-0001",
+        "ERP-0001"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "store_plan recorded PLAN-0001 to the ERP as ERP-0001. IRREVERSIBLE (AGENTS.md rule 5)."
+    },
+    {
+      "edge_id": "PROV-0016",
+      "relation": "Trigger",
+      "from_node": "plan:PLAN-0001",
+      "to_node": "po:PO-9021",
+      "produced_by_module": "ratchet",
+      "input_record_ids": [
+        "PLAN-0001",
+        "PO-9021",
+        "ERP-0002"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "PLAN-0001 created PO-9021 via create_alternate_po (ERP-0002): 450 units of COMP-104 from SUP-37 @ 129.62, expected 2026-09-07. IRREVERSIBLE (AGENTS.md rule 5)."
+    },
+    {
+      "edge_id": "PROV-0017",
+      "relation": "Trigger",
+      "from_node": "plan:PLAN-0001",
+      "to_node": "po:PO-9022",
+      "produced_by_module": "ratchet",
+      "input_record_ids": [
+        "PLAN-0001",
+        "PO-9022",
+        "ERP-0003"
+      ],
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z",
+      "note": "PLAN-0001 created PO-9022 via create_alternate_po (ERP-0003): 500 units of COMP-104 from SUP-42 @ 130.69, expected 2026-09-05. IRREVERSIBLE (AGENTS.md rule 5)."
+    }
+  ],
+  "assumptions": [
+    {
+      "assumption_id": "ASSUM-0001",
+      "subject_node": "plan:PLAN-0001",
+      "statement": "Select the Pareto candidate with the highest reliability_score; ties broken by the shortest lead_time_days; further ties broken by the lowest total_price.",
+      "source_module": "planner",
+      "source_field": "Plan.selection_rule",
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z"
+    },
+    {
+      "assumption_id": "ASSUM-0002",
+      "subject_node": "plan:PLAN-0001",
+      "statement": "Baseline = COMP-104's delayed PO's own contracted unit_price (118.0) x quantity_allocated (950) = 112100.00 \u2014 what this purchase would have cost had no disruption occurred. Actual = chosen_combination.total_price (123674.0), from real RFQ quotes.",
+      "source_module": "planner",
+      "source_field": "Plan.cost_of_inaction.baseline_note",
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z"
+    },
+    {
+      "assumption_id": "ASSUM-0003",
+      "subject_node": "plan:PLAN-0001",
+      "statement": "On-hand coverage (respecting the safety_stock reserve) already gets every order to its deadline \u2014 no gap to bridge.",
+      "source_module": "planner",
+      "source_field": "Plan.safety_stock_decision.reason",
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z"
+    },
+    {
+      "assumption_id": "ASSUM-0004",
+      "subject_node": "brief:PLAN-0001",
+      "statement": "This executes because total_cost (123674.00) is within the 150000 approval threshold, every high-priority production order reaches its own deadline under this plan, and SUP-37, SUP-42 passed the certification and quality-score hard filter before ever being quoted. It would be wrong to execute if SUP-37's reliability_score (0.81) does not hold in practice \u2014 e.g. a future verification cycle finds one of its claims contradicted \u2014 or if 150000 is not actually the correct approval threshold for this specific purchase.",
+      "source_module": "ratchet",
+      "source_field": "DecisionBrief.falsification_line",
+      "model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "DEC-0001",
+      "decision_node": "plan:COMP-104",
+      "module": "solver",
+      "outcome": "pareto_set=2 candidate(s), 1 rejected",
+      "input_record_ids": [
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "narration_model_version": null,
+      "timestamp": "2026-09-01T08:00:00Z"
+    },
+    {
+      "decision_id": "DEC-0002",
+      "decision_node": "plan:PLAN-0001",
+      "module": "planner",
+      "outcome": "chose SUP-37 (450) + SUP-42 (500), deadline_feasible=True",
+      "input_record_ids": [
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "narration_model_version": null,
+      "timestamp": "2026-09-01T08:00:00Z"
+    },
+    {
+      "decision_id": "DEC-0003",
+      "decision_node": "brief:PLAN-0001",
+      "module": "ratchet",
+      "outcome": "execute",
+      "input_record_ids": [
+        "PLAN-0001",
+        "COMP-104"
+      ],
+      "model_version": "deterministic",
+      "narration_model_version": "deterministic",
+      "timestamp": "2026-09-01T08:00:00Z"
+    }
+  ],
+  "regret_ledger": [
+    {
+      "option": "SUP-18",
+      "saved": -21074.0,
+      "regret": "SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call.",
+      "reason": "quality_below_threshold"
+    },
+    {
+      "option": "SUP-21 only",
+      "saved": -13512.0,
+      "regret": "lost on reliability_score: 0.75 vs chosen's 0.81",
+      "reason": "not_selected"
+    }
+  ],
+  "cost_of_inaction": {
+    "production_orders_at_risk": [
+      {
+        "production_order_id": "PROD-882",
+        "priority": "high",
+        "units_unbuilt": 460,
+        "fulfilled": false,
+        "deadline_missed_by_days": null,
+        "inaction_impact": "unfulfilled_indefinitely (460 units short)"
+      },
+      {
+        "production_order_id": "PROD-914",
+        "priority": "low",
+        "units_unbuilt": 250,
+        "fulfilled": false,
+        "deadline_missed_by_days": null,
+        "inaction_impact": "unfulfilled_indefinitely (250 units short)"
+      }
+    ],
+    "cost_increase_vs_baseline_pct": 10.32,
+    "baseline_total_cost": 112100.0,
+    "baseline_note": "Baseline = COMP-104's delayed PO's own contracted unit_price (118.0) x quantity_allocated (950) = 112100.00 \u2014 what this purchase would have cost had no disruption occurred. Actual = chosen_combination.total_price (123674.0), from real RFQ quotes."
+  },
+  "tool_calls": {
+    "monitor_polls_made": 1,
+    "monitor_polls_available": 15,
+    "verify_probes_made": 0,
+    "verify_probes_reused_from_monitor": 0,
+    "solver_quotes_requested": 3,
+    "solver_quotes_reused": 0,
+    "ratchet_approval_checks_made": 1,
+    "total_calls_made": 5,
+    "calls_avoided_by_gating": 14,
+    "notes": [
+      "MONITOR: 1 tracking poll(s) of 15 open PO(s); 14 skipped as not load-bearing.",
+      "VERIFY: 0 new tracking probe(s); 0 reused MONITOR's read of the same PO in the same cycle.",
+      "SOLVER: 3 RFQ call(s); 0 reused a still-valid quote. Hard-filtered suppliers were never quoted at all.",
+      "RATCHET: 1 approval check(s)."
+    ]
+  },
+  "tool_audit": {
+    "computed_at": "2026-09-01T08:00:00Z",
+    "preconditions": [
+      {
+        "module": "monitor",
+        "subject": "PO-7712",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7800",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7801",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7802",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7803",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7804",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7805",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7806",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7810",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7813",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7814",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7815",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7817",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7818",
+        "called": false,
+        "precondition": "not_load_bearing",
+        "detail": ""
+      },
+      {
+        "module": "monitor",
+        "subject": "PO-7819",
+        "called": true,
+        "precondition": "load_bearing",
+        "detail": "load-bearing for PROD-902, PROD-903 (3.6 days of coverage at risk)"
+      },
+      {
+        "module": "verify",
+        "subject": "PO-7819",
+        "called": false,
+        "precondition": "skip_reason=no_supplier_claim_on_record",
+        "detail": "No verification needed: no_supplier_claim_on_record"
+      },
+      {
+        "module": "solver",
+        "subject": "SUP-18",
+        "called": false,
+        "precondition": "hard_filter_drop=quality_below_threshold",
+        "detail": "SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call."
+      },
+      {
+        "module": "ratchet",
+        "subject": "PLAN-0001",
+        "called": true,
+        "precondition": "plan_cost_requires_approval_check",
+        "detail": "Checked plan total_cost=123674.0 against threshold=150000.0; decision='execute'."
+      }
+    ],
+    "module_summaries": [
+      {
+        "module": "monitor",
+        "calls_made": 1,
+        "calls_available": 15,
+        "calls_avoided": 14,
+        "gating_rule": "Tracking polled only for load-bearing POs \u2014 those whose withdrawal alone would turn some production order critical (ARCHITECTURE.md \u00a74 item 2b). Non-load-bearing POs skipped."
+      },
+      {
+        "module": "verify",
+        "calls_made": 0,
+        "calls_available": 0,
+        "calls_avoided": 0,
+        "gating_rule": "Tracking probes reused from MONITOR's read of the same PO in the same cycle. New probes issued only for POs MONITOR did not already poll."
+      },
+      {
+        "module": "solver",
+        "calls_made": 3,
+        "calls_available": 4,
+        "calls_avoided": 1,
+        "gating_rule": "RFQ calls issued only for suppliers surviving the hard filter (certification + quality + budget). Hard-filtered suppliers never quoted. Still-valid quotes from a prior cycle reused."
+      },
+      {
+        "module": "ratchet",
+        "calls_made": 1,
+        "calls_available": 1,
+        "calls_avoided": 0,
+        "gating_rule": "Approval check issued once per plan. Skipped entirely when no plan exists (nothing to check the cost of)."
+      }
+    ],
+    "total_calls_made": 5,
+    "total_calls_available": 20,
+    "total_calls_avoided": 15,
+    "necessity_verdict": "5 tool call(s) made, 15 avoided by gating or reuse. MONITOR: 1 made, 14 avoided; SOLVER: 3 made, 1 avoided; RATCHET: 1 made, 0 avoided."
+  }
+}

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>TRACE — Escalation Brief (PLAN-0002)</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #111; line-height: 1.4; padding: 20px; max-width: 800px; margin: 0 auto; }
+    .header { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .brand { font-size: 1.4rem; font-weight: bold; letter-spacing: -0.5px; }
+    .tag { background: #000; color: #fff; padding: 2px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 3px; }
+    .verdict-box { border: 2px solid #da3633; background: #fff5f5; padding: 14px; border-radius: 6px; margin-bottom: 16px; }
+    .verdict-title { font-size: 1.2rem; font-weight: bold; color: #da3633; display: flex; justify-content: space-between; }
+    .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 0.85rem; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ffcdd2; }
+    section { margin-bottom: 16px; }
+    h3 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 8px; color: #333; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 10px; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+    th { background: #f4f4f4; font-weight: bold; }
+    .falsification { background: #fff8e1; border-left: 4px solid #ffb300; padding: 10px; font-size: 0.85rem; margin-top: 10px; font-style: italic; }
+    .approval-box { border: 1px solid #999; padding: 12px; border-radius: 6px; background: #fafafa; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+    .btn-sign { border: 1px solid #000; padding: 6px 16px; font-weight: bold; background: #fff; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">TRACE <span class="tag">DISRUPTION CONTROL</span></div>
+      <div style="font-size: 0.8rem; color: #666;">Supply Chain Disruption Refusal &amp; Escalation Brief</div>
+    </div>
+    <div style="text-align: right; font-size: 0.8rem;">
+      <div><strong>Date:</strong> 2026-09-01</div>
+      <div><strong>Component:</strong> COMP-104</div>
+    </div>
+  </div>
+
+  <div class="verdict-box">
+    <div class="verdict-title">
+      <span>DECISION: ESCALATE</span>
+      <span>Cost: ₹123,614.00</span>
+    </div>
+    <div style="font-size: 0.85rem; margin-top: 6px;">
+      <strong>Triggers Fired:</strong> cost_above_threshold (Plan cost ₹123,614.00 exceeds threshold ₹150,000.00)
+    </div>
+    <div class="meta-grid">
+      <div><strong>Plan ID:</strong> PLAN-0002</div>
+      <div><strong>Approval Limit:</strong> ₹150,000.00</div>
+      <div><strong>Model Mode:</strong> deterministic</div>
+    </div>
+  </div>
+
+  <section>
+    <h3>1. Plain-Language Executive Summary</h3>
+    <p style="font-size: 0.85rem; white-space: pre-line;">DECISION: ESCALATE — COMP-104
+
+Triggers fired: cost_above_threshold
+
+Chosen plan PLAN-0002: SUP-37 (450) + SUP-42 (500), total_cost 123614.00 (approval threshold 150000).
+Cost delta vs baseline: not available (no disrupted PO identified).
+Production orders at risk if this plan is not executed:
+  - PROD-882 (high priority): 460 units unbuilt, never fully supplied by this plan.
+  - PROD-914 (low priority): 250 units unbuilt, never fully supplied by this plan.
+Rejected alternatives:
+  - SUP-18 [quality_below_threshold]: saved -21014.00 — SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) — dropped before spending an RFQ call.
+  - SUP-21 [budget_infeasible]: saved -64614.00 — SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) — dropped before spending an RFQ call.
+
+Falsification: This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.</p>
+  </section>
+
+  <section>
+    <h3>2. Recommended Sourcing Combination</h3>
+    <table>
+      <thead>
+        <tr><th>Supplier ID</th><th>Quantity</th><th>Unit Price</th><th>Lead Time</th><th>Reversibility</th></tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td><strong>SUP-37</strong></td>
+          <td>450 units</td>
+          <td>₹123.82</td>
+          <td>6 days</td>
+          <td><span style="text-transform:uppercase; font-size:0.75rem; background:#eee; padding:2px 6px;">compensable</span></td>
+        </tr>
+        <tr>
+          <td><strong>SUP-42</strong></td>
+          <td>500 units</td>
+          <td>₹135.79</td>
+          <td>4 days</td>
+          <td><span style="text-transform:uppercase; font-size:0.75rem; background:#eee; padding:2px 6px;">compensable</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h3>3. Rejected Alternatives &amp; Quantified Regret</h3>
+    <table>
+      <thead>
+        <tr><th>Option</th><th>Cost Delta / Savings</th><th>Rejection Reason</th><th>Regret Note</th></tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td><strong>SUP-18</strong></td>
+          <td>-₹21,014.00</td>
+          <td>quality_below_threshold</td>
+          <td>SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) — dropped before spending an RFQ call.</td>
+        </tr>
+        <tr>
+          <td><strong>SUP-21</strong></td>
+          <td>-₹64,614.00</td>
+          <td>budget_infeasible</td>
+          <td>SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) — dropped before spending an RFQ call.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h3>4. Inaction Counterfactual (If Refusal Stand Is Maintained)</h3>
+    <div style="font-size: 0.85rem; background: #f9f9f9; padding: 10px; border: 1px solid #e0e0e0;">
+      <div><strong>Production Orders at Risk:</strong> {len(brief.cost_of_inaction.production_orders_at_risk)} order(s)</div>
+      <ul>
+<li><strong>PROD-882</strong> (high priority): 460 units short — unfulfilled_indefinitely (460 units short)</li><li><strong>PROD-914</strong> (low priority): 250 units short — unfulfilled_indefinitely (250 units short)</li>
+      </ul>
+      <div style="margin-top: 6px; font-size: 0.8rem; color: #555;">No delayed purchase order found for this component -- there is no identifiable pre-disruption baseline price to compare against, so cost_increase_vs_baseline_pct is not computed. Not the same as inventing one (AGENTS.md rule 7): a percentage needs a real prior price to be a percentage OF; absent a disrupted PO, there is nothing that claims a disruption happened to this component at all.</div>
+    </div>
+  </section>
+
+  <section>
+    <h3>5. Falsification Line</h3>
+    <div class="falsification">
+      🔍 <strong>Falsification Condition:</strong> "This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed."
+    </div>
+  </section>
+
+  <div class="approval-box">
+    <div>
+      <div><strong>Human Approval Signature Required</strong></div>
+      <div style="color: #666; font-size: 0.75rem;">POST /agent/approval/PLAN-0002</div>
+    </div>
+    <div>
+      <button class="btn-sign">[ ] APPROVE &amp; WRITE ERP</button>
+      <button class="btn-sign" style="margin-left: 8px;">[ ] REJECT PLAN</button>
+    </div>
+  </div>
+</body>
+</html>
