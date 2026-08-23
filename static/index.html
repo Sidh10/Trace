@@ -6,105 +6,109 @@
   <title>TRACE — Disruption Control Agent</title>
   <style>
     :root {
+      /* Surfaces: tonal layering only — no shadows anywhere, ever */
+      --surface-0: #0a0a0a;
+      --surface-1: #0a0a0a;
+      --surface-2: #121212;
+      --border: #262626;
+      --border-strong: #404040;
+
+      /* Text */
+      --text-primary: #e5e5e5;
+      --text-secondary: #888888;
+
+      /* Accent (used sparingly — active states, primary actions only, never decorative) */
+      --accent: #2e90fa;
+
+      /* Status (strictly semantic) */
+      --status-healthy: #3fb950;
+      --status-healthy-bg: rgba(63, 185, 80, 0.12);
+      --status-at-risk: #d29922;
+      --status-at-risk-bg: rgba(210, 153, 34, 0.12);
+      --status-critical: #f85149;
+      --status-critical-bg: rgba(248, 81, 73, 0.12);
+
+      /* Typography: system stacks only, no web fonts */
       --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
-
-      --bg: #0d0f11;
-      --card-bg: #14171a;
-      --card-border: #262a30;
-      --header-bg: #111316;
-      
-      --text: #d8dde3;
-      --text-muted: #7d8590;
-      --heading: #f0f3f6;
-      
-      --accent: #58a6ff;
-      --accent-hover: #79c0ff;
-      
-      --success: #2ea043;
-      --success-bg: rgba(46, 160, 67, 0.12);
-      
-      --warning: #d29922;
-      --warning-bg: rgba(210, 153, 34, 0.12);
-      
-      --danger: #f85149;
-      --danger-bg: rgba(248, 81, 73, 0.12);
-      
-      --purple: #a371f7;
-      --purple-bg: rgba(163, 113, 247, 0.12);
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
-      background-color: var(--bg);
-      color: var(--text);
+      background-color: var(--surface-0);
+      color: var(--text-primary);
       font-family: var(--font-ui);
       font-size: 13px;
-      line-height: 1.4;
+      line-height: 1.35;
       padding-bottom: 40px;
       -webkit-font-smoothing: antialiased;
     }
 
     /* Top Nav / Header */
     header {
-      background-color: var(--header-bg);
-      border-bottom: 1px solid var(--card-border);
-      padding: 8px 16px;
+      background-color: var(--surface-0);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 8px;
       position: sticky;
       top: 0;
       z-index: 100;
     }
 
     .brand-title {
-      font-size: 0.95rem;
+      font-size: 0.85rem;
       font-weight: 700;
-      color: var(--heading);
+      color: var(--text-primary);
       display: flex;
       align-items: center;
       gap: 8px;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
     }
 
     .brand-title span.badge-team {
-      background: #1f2328;
-      color: var(--text-muted);
-      border: 1px solid var(--card-border);
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
       font-size: 0.65rem;
-      padding: 2px 6px;
-      border-radius: 2px;
+      padding: 1px 5px;
+      border-radius: 0;
       font-weight: 600;
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.06em;
     }
 
     .header-controls {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .status-badge {
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
-      padding: 3px 8px;
-      border-radius: 2px;
+      padding: 3px 6px;
+      border-radius: 0;
       font-weight: 500;
-      background: #14171a;
-      border: 1px solid var(--card-border);
-      color: var(--text-muted);
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
     }
+
     .status-badge.online {
-      color: var(--success);
-      border-color: rgba(46, 160, 67, 0.4);
+      color: var(--status-healthy);
+      border-color: rgba(63, 185, 80, 0.4);
     }
 
     /* Layout grid */
@@ -125,12 +129,12 @@
       }
     }
 
-    /* Cards */
+    /* Elevation Level 1: same bg as Level 0 (#0a0a0a), defined ONLY by a 1px --border */
     .card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 2px;
-      padding: 12px 14px;
+      background-color: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 12px;
       box-shadow: none;
     }
 
@@ -138,20 +142,20 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 10px;
-      border-bottom: 1px solid var(--card-border);
-      padding-bottom: 8px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
     }
 
     .card-title {
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       font-weight: 700;
-      color: var(--heading);
+      color: var(--text-secondary);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
     }
 
     /* Buttons */
@@ -160,124 +164,132 @@
       align-items: center;
       justify-content: center;
       gap: 4px;
-      padding: 4px 10px;
-      border-radius: 2px;
+      padding: 4px 8px;
+      border-radius: 0;
       font-weight: 600;
-      font-size: 0.75rem;
-      letter-spacing: 0.04em;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       cursor: pointer;
-      border: 1px solid var(--card-border);
-      background: #1f2328;
-      color: var(--text);
+      border: 1px solid var(--border);
+      background: var(--surface-0);
+      color: var(--text-primary);
       transition: none;
     }
 
     .btn:hover {
-      background: #292e35;
-      border-color: #444c56;
-      color: var(--heading);
+      background: var(--surface-2);
+      border-color: var(--border-strong);
     }
 
     .btn-primary {
-      background: var(--success);
+      background: var(--accent);
       color: #ffffff;
-      border-color: var(--success);
+      border-color: var(--accent);
     }
+
     .btn-primary:hover {
-      background: #2c974b;
-      border-color: #2c974b;
+      background: #1f7ae0;
+      border-color: #1f7ae0;
     }
 
     .btn-danger {
-      background: var(--danger-bg);
-      color: var(--danger);
+      background: var(--status-critical-bg);
+      color: var(--status-critical);
       border-color: rgba(248, 81, 73, 0.4);
     }
+
     .btn-danger:hover {
-      background: var(--danger);
+      background: var(--status-critical);
       color: #ffffff;
     }
 
     .btn-warning {
-      background: #1f2328;
-      color: var(--text);
-      border-color: var(--card-border);
+      background: var(--surface-0);
+      color: var(--text-primary);
+      border-color: var(--border);
     }
+
     .btn-warning:hover {
-      background: #292e35;
-      border-color: #444c56;
+      background: var(--surface-2);
+      border-color: var(--border-strong);
     }
 
     .btn-accent {
-      background: #1f6feb;
+      background: var(--accent);
       color: #ffffff;
-      border-color: #1f6feb;
+      border-color: var(--accent);
     }
+
     .btn-accent:hover {
-      background: #388bfd;
+      background: #1f7ae0;
     }
 
     .btn-scenario {
-      background: #111316;
-      border: 1px solid var(--card-border);
+      background: var(--surface-0);
+      border: 1px solid var(--border);
       text-align: left;
-      padding: 7px 9px;
+      padding: 6px 8px;
       display: flex;
       flex-direction: column;
       align-items: flex-start;
       gap: 2px;
       width: 100%;
-      border-radius: 2px;
+      border-radius: 0;
       text-transform: none;
     }
+
     .btn-scenario:hover {
-      border-color: #444c56;
-      background: #171a1e;
+      border-color: var(--border-strong);
+      background: var(--surface-2);
     }
+
     .btn-scenario .title {
       font-weight: 600;
-      color: var(--heading);
-      font-size: 0.76rem;
+      color: var(--text-primary);
+      font-size: 0.72rem;
       letter-spacing: 0.04em;
       text-transform: uppercase;
     }
+
     .btn-scenario .sub {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      line-height: 1.3;
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      line-height: 1.25;
     }
 
     .scenario-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-      gap: 6px;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 4px;
     }
 
     /* Tables */
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.78rem;
+      font-size: 0.75rem;
     }
 
     th, td {
-      padding: 6px 8px;
+      padding: 5px 6px;
       text-align: left;
-      border-bottom: 1px solid #1c2025;
+      border-bottom: 1px solid var(--border);
     }
 
     th {
-      background-color: #111316;
-      color: var(--text-muted);
+      background-color: var(--surface-0);
+      color: var(--text-secondary);
       font-weight: 600;
       text-transform: uppercase;
       font-size: 0.68rem;
-      letter-spacing: 0.08em;
-      border-bottom: 1px solid var(--card-border);
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--border);
     }
 
-    tr:hover td { background-color: rgba(255,255,255,0.02); }
+    tr:hover td {
+      background-color: rgba(255, 255, 255, 0.015);
+    }
 
     /* Numeric column alignment & tabular nums */
     #coverage-table th:nth-child(4),
@@ -292,11 +304,13 @@
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
     }
+
     #coverage-table td:nth-child(1),
     #coverage-table td:nth-child(8) {
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
     }
+
     #regret-box table th:nth-child(2),
     #regret-box table td:nth-child(2) {
       text-align: right;
@@ -304,39 +318,75 @@
       font-variant-numeric: tabular-nums;
     }
 
-    /* Status Pill Badges */
+    /* Status Indicators & Pills */
     .pill {
       display: inline-block;
-      padding: 1px 6px;
-      border-radius: 2px;
+      padding: 1px 5px;
+      border-radius: 0;
       font-size: 0.68rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.04em;
       border: 1px solid transparent;
     }
-    .pill-healthy { background: var(--success-bg); color: var(--success); border-color: rgba(46, 160, 67, 0.4); }
-    .pill-at_risk { background: var(--warning-bg); color: var(--warning); border-color: rgba(210, 153, 34, 0.4); }
-    .pill-critical { background: var(--danger-bg); color: var(--danger); border-color: rgba(248, 81, 73, 0.4); }
-    .pill-thin { background: rgba(125, 133, 144, 0.15); color: var(--text-muted); border-color: var(--card-border); font-family: var(--font-mono); }
 
-    .pill-execute { background: var(--success-bg); color: var(--success); border-color: rgba(46, 160, 67, 0.4); font-size: 0.75rem; padding: 2px 8px; }
-    .pill-escalate { background: var(--danger-bg); color: var(--danger); border-color: rgba(248, 81, 73, 0.4); font-size: 0.75rem; padding: 2px 8px; }
+    .pill-healthy {
+      background: var(--status-healthy-bg);
+      color: var(--status-healthy);
+      border-color: rgba(63, 185, 80, 0.35);
+    }
+
+    .pill-at_risk {
+      background: var(--status-at-risk-bg);
+      color: var(--status-at-risk);
+      border-color: rgba(210, 153, 34, 0.35);
+    }
+
+    .pill-critical {
+      background: var(--status-critical-bg);
+      color: var(--status-critical);
+      border-color: rgba(248, 81, 73, 0.35);
+    }
+
+    .pill-thin {
+      background: transparent;
+      color: var(--text-secondary);
+      border-color: var(--border);
+      font-family: var(--font-mono);
+    }
+
+    .pill-execute {
+      background: var(--status-healthy-bg);
+      color: var(--status-healthy);
+      border-color: rgba(63, 185, 80, 0.4);
+      font-size: 0.72rem;
+      padding: 2px 6px;
+    }
+
+    /* Escalate uses amber per spec */
+    .pill-escalate {
+      background: var(--status-at-risk-bg);
+      color: var(--status-at-risk);
+      border-color: rgba(210, 153, 34, 0.4);
+      font-size: 0.72rem;
+      padding: 2px 6px;
+    }
 
     /* Gap highlight */
     .gap-badge {
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
       font-weight: 600;
-      color: var(--warning);
-      background: var(--warning-bg);
+      color: var(--status-at-risk);
+      background: var(--status-at-risk-bg);
       border: 1px solid rgba(210, 153, 34, 0.3);
-      padding: 1px 4px;
-      border-radius: 2px;
-      font-size: 0.72rem;
+      padding: 1px 3px;
+      border-radius: 0;
+      font-size: 0.7rem;
     }
+
     .gap-badge.zero {
-      color: var(--text-muted);
+      color: var(--text-secondary);
       background: transparent;
       border: 1px solid transparent;
       font-weight: normal;
@@ -344,21 +394,29 @@
 
     /* Verdict Banner */
     .verdict-box {
-      border: 1px solid var(--card-border);
-      border-radius: 2px;
-      padding: 12px;
-      margin-bottom: 14px;
-      background: #101215;
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 10px;
+      margin-bottom: 12px;
+      background: var(--surface-0);
     }
-    .verdict-box.execute { border-color: rgba(46, 160, 67, 0.5); }
-    .verdict-box.escalate { border-color: rgba(248, 81, 73, 0.5); }
+
+    .verdict-box.execute {
+      border-color: rgba(63, 185, 80, 0.4);
+    }
+
+    /* Escalate box uses amber per spec */
+    .verdict-box.escalate {
+      border-color: rgba(210, 153, 34, 0.4);
+    }
 
     .verdict-top {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
+
     .verdict-top div:last-child {
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
@@ -367,107 +425,153 @@
 
     .verdict-details {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 8px;
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid var(--card-border);
-      font-size: 0.76rem;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 0.72rem;
     }
+
     .verdict-details span.bold {
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
     }
 
     .falsification-line {
-      margin-top: 8px;
+      margin-top: 6px;
       font-style: normal;
-      color: var(--text);
-      font-size: 0.78rem;
-      background: #14171a;
-      padding: 6px 10px;
-      border-left: 2px solid #57606a;
-      border-radius: 2px;
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      background: var(--surface-2);
+      padding: 4px 8px;
+      border-left: 2px solid var(--border-strong);
+      border-radius: 0;
     }
 
     /* Active Log */
     .log-box {
-      background: #101215;
-      border: 1px solid var(--card-border);
-      border-radius: 2px;
-      padding: 8px 10px;
-      max-height: 140px;
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 6px 8px;
+      max-height: 120px;
       overflow-y: auto;
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
-      font-size: 0.74rem;
-      color: var(--text);
+      font-size: 0.72rem;
+      color: var(--text-primary);
     }
-    .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1a1e22; padding-bottom: 3px; }
-    .log-entry .time { color: var(--text-muted); }
-    .log-entry .tag { color: var(--text); font-weight: 600; }
+
+    .log-entry {
+      margin-bottom: 3px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 2px;
+    }
+
+    .log-entry .time {
+      color: var(--text-secondary);
+    }
+
+    .log-entry .tag {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
 
     /* Provenance Graph Trail */
     .prov-chain {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      margin-top: 8px;
+      gap: 4px;
+      margin-top: 6px;
     }
+
     .prov-node {
-      background: #101215;
-      border: 1px solid var(--card-border);
-      border-radius: 2px;
-      padding: 8px 10px;
-      font-size: 0.75rem;
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 6px 8px;
+      font-size: 0.72rem;
     }
+
     .prov-node-header {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 3px;
+      margin-bottom: 2px;
       font-weight: 600;
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
     }
+
     .rel-tag {
       font-size: 0.65rem;
       padding: 1px 4px;
-      border-radius: 2px;
+      border-radius: 0;
       font-weight: 600;
       text-transform: uppercase;
       font-family: var(--font-mono);
       border: 1px solid transparent;
     }
-    .rel-Support { background: var(--success-bg); color: var(--success); border-color: rgba(46,160,67,0.3); }
-    .rel-Contradict { background: var(--danger-bg); color: var(--danger); border-color: rgba(248,81,73,0.3); }
-    .rel-Invalidate { background: var(--danger-bg); color: var(--danger); border-color: rgba(248,81,73,0.3); }
-    .rel-Trigger { background: var(--warning-bg); color: var(--warning); border-color: rgba(210,153,34,0.3); }
-    .rel-Depend-on { background: rgba(125, 133, 144, 0.15); color: var(--text); border-color: var(--card-border); }
-    .rel-Update { background: var(--purple-bg); color: var(--purple); border-color: rgba(163,113,247,0.3); }
+
+    .rel-Support {
+      background: var(--status-healthy-bg);
+      color: var(--status-healthy);
+      border-color: rgba(63, 185, 80, 0.3);
+    }
+
+    .rel-Contradict {
+      background: var(--status-critical-bg);
+      color: var(--status-critical);
+      border-color: rgba(248, 81, 73, 0.3);
+    }
+
+    .rel-Invalidate {
+      background: var(--status-critical-bg);
+      color: var(--status-critical);
+      border-color: rgba(248, 81, 73, 0.3);
+    }
+
+    .rel-Trigger {
+      background: var(--status-at-risk-bg);
+      color: var(--status-at-risk);
+      border-color: rgba(210, 153, 34, 0.3);
+    }
+
+    .rel-Depend-on {
+      background: transparent;
+      color: var(--text-primary);
+      border-color: var(--border);
+    }
+
+    .rel-Update {
+      background: rgba(163, 113, 247, 0.12);
+      color: #a371f7;
+      border-color: rgba(163, 113, 247, 0.3);
+    }
 
     #tool-audit-box {
-      background: #101215;
-      padding: 10px;
-      border-radius: 2px;
-      border: 1px solid var(--card-border);
-      font-size: 0.76rem;
+      background: var(--surface-0);
+      padding: 8px;
+      border-radius: 0;
+      border: 1px solid var(--border);
+      font-size: 0.72rem;
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
     }
 
     h4 {
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
-      margin-bottom: 6px;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
     }
 
     /* Utility */
-    .flex-gap { display: flex; gap: 8px; align-items: center; }
-    .muted { color: var(--text-muted); }
+    .flex-gap { display: flex; gap: 6px; align-items: center; }
+    .muted { color: var(--text-secondary); }
     .bold { font-weight: 600; }
   </style>
 </head>
@@ -478,7 +582,7 @@
     <div class="brand-title">
       <span>TRACE</span>
       <span class="badge-team">PUNE 2026</span>
-      <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted); text-transform: none; letter-spacing: normal;">Supply Chain Disruption Control Agent</span>
+      <span style="font-size: 0.7rem; font-weight: normal; color: var(--text-secondary); text-transform: none; letter-spacing: normal;">Supply Chain Disruption Control Agent</span>
     </div>
     <div class="header-controls">
       <div class="status-badge online" id="health-badge">LLM MODE: --</div>
@@ -494,7 +598,7 @@
       <div class="card-header">
         <div class="card-title">
           <span>COVERAGE BOARD</span>
-          <span style="font-size: 0.72rem; font-weight: normal; color: var(--text-muted); letter-spacing: normal; text-transform: none;">(Item 12 — Live Inventory & PO Dependability per Production Order)</span>
+          <span style="font-size: 0.68rem; font-weight: normal; color: var(--text-secondary); letter-spacing: normal; text-transform: none;">(Item 12 — Live Inventory & PO Dependability per Production Order)</span>
         </div>
         <button class="btn" onclick="fetchCoverageBoard()">REFRESH BOARD</button>
       </div>
@@ -516,7 +620,7 @@
             </tr>
           </thead>
           <tbody id="coverage-tbody">
-            <tr><td colspan="10" class="muted" style="text-align:center; padding: 20px;">Loading live coverage board...</td></tr>
+            <tr><td colspan="10" class="muted" style="text-align:center; padding: 16px;">Loading live coverage board...</td></tr>
           </tbody>
         </table>
       </div>
@@ -531,7 +635,7 @@
           <div class="card-title">
             <span>JUDGE DISRUPTION PANEL</span>
           </div>
-          <span style="font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.04em;">SUPPORTS DUAL INJECTION</span>
+          <span style="font-size: 0.68rem; color: var(--text-secondary); letter-spacing: 0.06em;">SUPPORTS DUAL INJECTION</span>
         </div>
 
         <div class="scenario-grid">
@@ -581,16 +685,16 @@
           </button>
         </div>
 
-        <div style="margin-top: 12px;">
-          <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; color: var(--text-muted);">Active Disruption Stream:</div>
+        <div style="margin-top: 10px;">
+          <div style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; color: var(--text-secondary);">Active Disruption Stream:</div>
           <div class="log-box" id="scenario-log">
             <div class="muted">No disruptions injected yet. Click a scenario button above to inject.</div>
           </div>
         </div>
 
-        <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center; background: #101215; padding: 8px 10px; border-radius: 2px; border: 1px solid var(--card-border);">
-          <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);">TARGET:</div>
-          <select id="component-select" style="background: #1a1e22; color: var(--text); border: 1px solid var(--card-border); padding: 4px 8px; border-radius: 2px; font-weight: 600; font-size: 0.76rem; font-family: var(--font-mono);">
+        <div style="margin-top: 10px; display: flex; gap: 6px; align-items: center; background: var(--surface-0); padding: 6px 8px; border-radius: 0; border: 1px solid var(--border);">
+          <div style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary);">TARGET:</div>
+          <select id="component-select" style="background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border); padding: 3px 6px; border-radius: 0; font-weight: 600; font-size: 0.72rem; font-family: var(--font-mono);">
             <option value="COMP-104">COMP-104 (Motor Driver IC)</option>
             <option value="COMP-122">COMP-122 (Servo Motor Actuator)</option>
             <option value="COMP-108">COMP-108 (CAN Bus Transceiver)</option>
@@ -610,7 +714,7 @@
         </div>
 
         <div id="verdict-container">
-          <div class="muted" style="text-align: center; padding: 30px; font-size: 0.8rem;">
+          <div class="muted" style="text-align: center; padding: 24px; font-size: 0.75rem;">
             Ready for execution. Select a disruption scenario or click <strong>RUN PIPELINE</strong>.
           </div>
         </div>
@@ -634,13 +738,13 @@
           <div id="tool-audit-box"></div>
 
           <h4>REJECTED ALTERNATIVES (REGRET LEDGER)</h4>
-          <div id="regret-box" style="overflow-x: auto; margin-bottom: 12px;"></div>
+          <div id="regret-box" style="overflow-x: auto; margin-bottom: 8px;"></div>
         </div>
 
         <!-- Right: Provenance Graph Trail -->
         <div>
           <h4>PROVENANCE GRAPH CHAIN</h4>
-          <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 6px;">Causal trace: Disruption Event ➔ Coverage/Verify ➔ Pareto Solver ➔ Recovery Plan ➔ Ratchet Brief</div>
+          <div style="font-size: 0.68rem; color: var(--text-secondary); margin-bottom: 4px;">Causal trace: Disruption Event ➔ Coverage/Verify ➔ Pareto Solver ➔ Recovery Plan ➔ Ratchet Brief</div>
           <div class="prov-chain" id="prov-chain-box"></div>
         </div>
 
