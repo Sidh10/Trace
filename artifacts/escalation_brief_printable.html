@@ -40,11 +40,11 @@
       <span>Cost: ₹123,614.00</span>
     </div>
     <div style="font-size: 0.85rem; margin-top: 6px;">
-      <strong>Triggers Fired:</strong> cost_above_threshold (Plan cost ₹123,614.00 exceeds threshold ₹150,000.00)
+      <strong>Triggers Fired:</strong> cost_above_threshold (Plan cost ₹123,614.00 exceeds threshold ₹50,000.00)
     </div>
     <div class="meta-grid">
       <div><strong>Plan ID:</strong> PLAN-0002</div>
-      <div><strong>Approval Limit:</strong> ₹150,000.00</div>
+      <div><strong>Approval Limit:</strong> ₹50,000.00</div>
       <div><strong>Model Mode:</strong> deterministic</div>
     </div>
   </div>
@@ -55,8 +55,9 @@
 
 Triggers fired: cost_above_threshold
 
-Chosen plan PLAN-0002: SUP-37 (450) + SUP-42 (500), total_cost 123614.00 (approval threshold 150000).
+Chosen plan PLAN-0002: SUP-37 (450) + SUP-42 (500), total_cost 123614.00 (approval threshold 50000).
 Cost delta vs baseline: not available (no disrupted PO identified).
+Physical stockout gap: none.
 Production orders at risk if this plan is not executed:
   - PROD-882 (high priority): 460 units unbuilt, never fully supplied by this plan.
   - PROD-914 (low priority): 250 units unbuilt, never fully supplied by this plan.
@@ -64,7 +65,7 @@ Rejected alternatives:
   - SUP-18 [quality_below_threshold]: saved -21014.00 — SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) — dropped before spending an RFQ call.
   - SUP-21 [budget_infeasible]: saved -64614.00 — SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) — dropped before spending an RFQ call.
 
-Falsification: This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.</p>
+Falsification: This escalates because total_cost (123614.00) exceeds the 50000 approval threshold. It would be wrong to escalate if the 50000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.</p>
   </section>
 
   <section>
@@ -131,7 +132,7 @@ Falsification: This escalates because total_cost (123614.00) exceeds the 150000 
   <section>
     <h3>5. Falsification Line</h3>
     <div class="falsification">
-      🔍 <strong>Falsification Condition:</strong> "This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed."
+      🔍 <strong>Falsification Condition:</strong> "This escalates because total_cost (123614.00) exceeds the 50000 approval threshold. It would be wrong to escalate if the 50000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed."
     </div>
   </section>
 

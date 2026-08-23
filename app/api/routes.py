@@ -119,7 +119,7 @@ from app.engine.contingency import (
 )
 from app.engine.coverage import CoverageReport, compute_coverage
 from app.engine.monitor import MonitorReport, run_monitor_cycle
-from app.engine.planner import Plan, run_planner
+from app.engine.planner import Plan, find_disrupted_po, run_planner
 from app.engine.ratchet import DecisionBrief, run_ratchet
 from app.engine.solver import SolverResult, run_solver
 from app.engine.staleness import STAGE_ORDER as _STALENESS_STAGE_ORDER
@@ -256,14 +256,26 @@ def _store() -> Store:
     return seed_data.STATE
 
 
-def _current_approval_threshold() -> float:
-    """Read from `app.config` at call time, not the module-level import.
-    `Store.check_approval` resolves it the same way, so the staleness check
-    and the decision it is checking see the same value — and a test that
-    moves the threshold is detectable as the RATCHET-level change it is."""
-    from app import config
+def _disrupted_po_id(store: Store, component_id: str) -> Optional[str]:
+    """The PO id whose own `approval_required_above` governs this
+    component's decision, when one exists. One canonical resolution
+    (`planner.find_disrupted_po`), reused everywhere a po_id is needed for
+    this component: SOLVER's budget hard-filter, RATCHET's cost check, and
+    the staleness threshold comparison below — never re-derived per call
+    site, so all three can never disagree about which PO that is."""
+    po = find_disrupted_po(store, component_id)
+    return po.po_id if po is not None else None
 
-    return config.TRACE_APPROVAL_THRESHOLD
+
+def _current_approval_threshold(store: Store, component_id: str) -> float:
+    """Read live off the disrupted PO's own `approval_required_above` when
+    one exists, else `app.config.TRACE_APPROVAL_THRESHOLD` — the SAME
+    resolution `Store.resolve_approval_threshold` gives `check_approval` and
+    RATCHET's displayed threshold, so the staleness check and the decision
+    it is checking always see the same value, whether that value comes from
+    a PO's own field or the global default — and a test that moves either
+    one is detectable as the RATCHET-level change it is."""
+    return store.resolve_approval_threshold(_disrupted_po_id(store, component_id))
 
 
 # Stage order for re-entry, mirroring staleness.STAGE_ORDER. Imported rather
@@ -436,6 +448,15 @@ def _walk(
 
     coverage_results = [r for r in coverage.results if r.component_id == component_id]
 
+    # The PO this disruption is about, if any — one resolution, reused by
+    # both the hard filter's budget check and RATCHET's cost check below, so
+    # neither can silently disagree with the other about which PO's own
+    # `approval_required_above` (or the global default, absent one) governs
+    # this pass. Computed unconditionally: RATCHET may run even when SOLVER
+    # is reused from `prior` (e.g. an approval-threshold-only staleness
+    # finding), and needs the same po_id either way.
+    po_id = _disrupted_po_id(store, component_id)
+
     # HARD FILTER + SOLVER — hard_filter runs inside run_solver, before RFQ.
     if should_run("SOLVER") or prior is None:
         quantity_needed = sum(r.component_required for r in coverage_results)
@@ -443,6 +464,7 @@ def _walk(
             store,
             component_id=component_id,
             quantity_needed=quantity_needed,
+            po_id=po_id,
             now=now,
             min_price_only=(variant == "cheapest_always"),
             skip_quality_filter=(variant == "cheapest_always"),
@@ -475,7 +497,7 @@ def _walk(
 
     # RATCHET — the execute-or-escalate decision. Not this module's call.
     if should_run("RATCHET") or prior is None:
-        brief = run_ratchet(store, plan, solver_result, now=now)
+        brief = run_ratchet(store, plan, solver_result, po_id=po_id, now=now)
         walked.append("RATCHET")
     else:
         brief = prior.brief
@@ -553,7 +575,7 @@ def _finish(
             plan,
             outputs.coverage,
             outputs.monitor,
-            approval_threshold=_current_approval_threshold(),
+            approval_threshold=_current_approval_threshold(store, component_id),
             solver_result=outputs.solver_result,
             now=now,
         )
@@ -642,7 +664,7 @@ def run_pipeline(
         report = detect_staleness(
             store,
             prior.snapshot,
-            current_approval_threshold=_current_approval_threshold(),
+            current_approval_threshold=_current_approval_threshold(store, component_id),
             now=now,
         )
         if not report.is_stale:
@@ -723,14 +745,14 @@ def _reenter_on_contingency(
             outputs.plan,
             outputs.coverage,
             outputs.monitor,
-            approval_threshold=_current_approval_threshold(),
+            approval_threshold=_current_approval_threshold(store, component_id),
             solver_result=outputs.solver_result,
             now=now,
         )
         residual = detect_staleness(
             store,
             fresh,
-            current_approval_threshold=_current_approval_threshold(),
+            current_approval_threshold=_current_approval_threshold(store, component_id),
             now=now,
         )
         if residual.is_stale:
@@ -820,14 +842,14 @@ def _reenter(
             outputs.plan,
             outputs.coverage,
             outputs.monitor,
-            approval_threshold=_current_approval_threshold(),
+            approval_threshold=_current_approval_threshold(store, component_id),
             solver_result=outputs.solver_result,
             now=now,
         )
         residual = detect_staleness(
             store,
             fresh_snapshot,
-            current_approval_threshold=_current_approval_threshold(),
+            current_approval_threshold=_current_approval_threshold(store, component_id),
             now=now,
         )
         if not residual.is_stale:

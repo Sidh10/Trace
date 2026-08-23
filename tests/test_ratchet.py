@@ -86,6 +86,28 @@ def test_trigger_cost_above_threshold(store):
     assert brief.triggers_fired == ["cost_above_threshold"]
 
 
+def test_approval_threshold_is_read_live_not_at_import_time(store, monkeypatch):
+    """`config.TRACE_APPROVAL_THRESHOLD` can change after `ratchet.py` is
+    first imported (e.g. a scenario injection lowering it mid-process, the
+    way `POST /environment/inject/exceeds_approval` does). A `from
+    app.config import TRACE_APPROVAL_THRESHOLD`-style snapshot at module
+    load time would freeze the OLD value forever in this process, so the
+    decision brief's displayed threshold (and its narration/falsification
+    text) would silently disagree with the threshold `store.check_approval`
+    actually used to decide `cost_above_threshold` a few lines above."""
+    monkeypatch.setattr(config, "TRACE_APPROVAL_THRESHOLD", 60_000.0)
+
+    combo = _combo("MID", price=100_000, lead=1, reliability=0.9)
+    order = _cov("PROD-LIVE", "high", days_to_deadline=10.0, required=100)
+    plan, result = _plan_and_result(store, "COMP-X", [combo], [order])
+
+    brief = run_ratchet(store, plan, result, now=NOW)
+    assert brief.decision == "escalate"
+    assert brief.approval_threshold == 60_000.0
+    assert "60000" in brief.narration or "60,000" in brief.narration
+    assert "60000" in brief.falsification_line or "60,000" in brief.falsification_line
+
+
 def test_trigger_no_feasible_deadline_plan_with_a_plan_present(store):
     """Every Pareto candidate misses a high-priority deadline; PLANNER falls
     back to the best infeasible one (deadline_feasible=False) rather than
@@ -147,6 +169,107 @@ def test_quality_risk_does_not_fire_when_a_plan_exists_even_if_some_supplier_was
     assert plan is not None
     brief = run_ratchet(store, plan, result, now=NOW)
     assert "quality_risk" not in brief.triggers_fired
+
+
+def test_trigger_production_shutdown_unavoidable_fires_when_a_real_gap_remains(store):
+    """The real problem statement's §4.9 lists "production shutdown is
+    unavoidable" as its own escalation condition — distinct from
+    `no_feasible_deadline_plan`, which only asks about the FINAL deadline.
+    Reuses the exact numbers
+    test_planner.py::test_draw_is_capped_at_the_spec_safety_stock_field_not_a_second_definition
+    already proves leave a physical gap even after the full safety-stock
+    draw: 300 usable / 50 daily = 6.0 days on-hand; a 10-day lead time makes
+    a 4.0-day gap; safety_stock=40 only buys back 0.8 of those days (40/50),
+    leaving 3.2 days unclosed.
+
+    The order is LOW priority deliberately, not high: `deadline_feasible`
+    (`no_feasible_deadline_plan`'s own fact) is only ever computed against
+    HIGH-priority orders (`_is_deadline_feasible`'s own docstring — "Medium/
+    low-priority misses are NOT infeasibility"), while `SafetyStockDecision.
+    triggered` is priority-agnostic. A high-priority order here would make
+    BOTH triggers fire from the same underlying lateness and this test would
+    no longer isolate the one fact it exists to prove — see
+    `test_cost_above_threshold_and_production_shutdown_unavoidable_can_co_fire`
+    below for the deliberate two-trigger case."""
+    from app.environment.schemas import InventoryRecord
+
+    store.inventory["COMP-CAP"] = InventoryRecord(
+        component_id="COMP-CAP", name="x", current_stock=300, usable_stock=300,
+        daily_usage=50, safety_stock=40, warehouse="x", last_updated=NOW,
+    )
+    combo = _combo("SLOW", price=1000, lead=10, reliability=0.8, qty=100, moq=10, avail=100)
+    order = _cov("PROD-CAP", "low", days_to_deadline=9.0, required=300, component_id="COMP-CAP")
+    plan, result = _plan_and_result(store, "COMP-CAP", [combo], [order])
+
+    assert plan.safety_stock_decision.remaining_gap_days == 3.2  # the underlying fact, sanity-checked
+    assert plan.deadline_feasible is True  # low-priority lateness never trips this
+
+    brief = run_ratchet(store, plan, result, now=NOW)
+    assert brief.triggers_fired == ["production_shutdown_unavoidable"]  # isolated — nothing else fires
+    assert brief.decision == "escalate"
+    assert "3.2" in brief.falsification_line
+
+
+def test_cost_above_threshold_and_production_shutdown_unavoidable_can_co_fire(store):
+    """Two triggers reading genuinely independent facts (cost vs. a physical
+    stockout gap) must both survive when both conditions are real — not just
+    whichever one `_evaluate_triggers` happens to check first, and the
+    falsification line must name both reasons, not just one.
+
+    Same physical-gap setup as the isolated test above (LOW priority, same
+    reasoning: keeps `no_feasible_deadline_plan` out of it so exactly two
+    triggers are in play, not three), with the combo's price raised to
+    200,000 — comfortably over the 150,000 default threshold — to also trip
+    `cost_above_threshold`."""
+    from app.environment.schemas import InventoryRecord
+
+    store.inventory["COMP-BOTH"] = InventoryRecord(
+        component_id="COMP-BOTH", name="x", current_stock=300, usable_stock=300,
+        daily_usage=50, safety_stock=40, warehouse="x", last_updated=NOW,
+    )
+    combo = _combo("SLOW_EXPENSIVE", price=200_000, lead=10, reliability=0.8, qty=100, moq=10, avail=100)
+    order = _cov("PROD-BOTH", "low", days_to_deadline=9.0, required=300, component_id="COMP-BOTH")
+    plan, result = _plan_and_result(store, "COMP-BOTH", [combo], [order])
+
+    assert plan.safety_stock_decision.remaining_gap_days == 3.2  # same physical gap as above
+    assert plan.deadline_feasible is True  # confirms no_feasible_deadline_plan is genuinely out of play
+
+    brief = run_ratchet(store, plan, result, now=NOW)
+    assert brief.decision == "escalate"
+    assert set(brief.triggers_fired) == {"cost_above_threshold", "production_shutdown_unavoidable"}
+
+    # The falsification line must read as two real reasons joined together,
+    # not silently drop one — every number from BOTH triggers has to appear.
+    line = brief.falsification_line
+    assert "This escalates because" in line
+    assert "200000" in line
+    assert "150000" in line
+    assert "3.2" in line
+    clauses = line.split("This escalates because ", 1)[1].split(". It would be wrong")[0]
+    assert clauses.count(";") == 1  # exactly two clauses joined by "; ", not three, not one
+
+
+def test_trigger_production_shutdown_unavoidable_does_not_fire_when_the_draw_fully_closes_the_gap(store):
+    """Same shape of scenario, but with enough safety_stock to close the
+    whole gap — reuses
+    test_planner.py::test_smoke_safety_stock_is_the_only_thing_standing_between_the_plan_and_the_deadline's
+    numbers, where the full 100-unit reserve fully bridges a 2.0-day gap
+    (300 usable / 50 daily = 6.0 days on-hand vs. an 8-day lead time)."""
+    from app.environment.schemas import InventoryRecord
+
+    store.inventory["COMP-SAFETY"] = InventoryRecord(
+        component_id="COMP-SAFETY", name="x", current_stock=300, usable_stock=300,
+        daily_usage=50, safety_stock=100, warehouse="x", last_updated=NOW,
+    )
+    combo = _combo("SLOW", price=1000, lead=8, reliability=0.8, qty=100, moq=10, avail=100)
+    order = _cov("PROD-SAFETY", "high", days_to_deadline=5.5, required=300, component_id="COMP-SAFETY")
+    plan, result = _plan_and_result(store, "COMP-SAFETY", [combo], [order])
+
+    assert plan.safety_stock_decision.triggered is True  # a gap existed...
+    assert plan.safety_stock_decision.remaining_gap_days == 0.0  # ...but the draw fully closed it
+
+    brief = run_ratchet(store, plan, result, now=NOW)
+    assert "production_shutdown_unavoidable" not in brief.triggers_fired
 
 
 def test_multiple_triggers_can_co_fire(store):

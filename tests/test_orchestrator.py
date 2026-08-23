@@ -717,9 +717,66 @@ def test_the_orchestrator_does_not_hand_roll_po_ids():
 
 def test_no_approval_ceiling_is_passed_per_po(store):
     """RATCHET already authorised the plan's total cost; a per-PO ceiling
-    would be a second, redundant gate on a decision already made."""
-    source = open("app/api/routes.py", encoding="utf-8").read()
+    would be a second, redundant gate on a decision already made.
+
+    Scoped to `_write_erp_once` specifically — the function that builds a
+    NEW alternate PO's payload — not the whole file. `approval_required_above`
+    now legitimately appears elsewhere in `routes.py` (`_disrupted_po_id`,
+    `_current_approval_threshold`) for a different, correct reason: READING
+    an EXISTING PO's own threshold to decide whether to escalate, which is
+    not the "set a ceiling on the new PO being created" question this test
+    guards against."""
+    import inspect
+
+    from app.api.routes import _write_erp_once
+
+    source = inspect.getsource(_write_erp_once)
     assert "approval_required_above" not in source
+
+
+def test_disrupted_pos_own_approval_threshold_is_what_ratchet_actually_checks(store, monkeypatch):
+    """§5.2's `approval_required_above` is a PER-PO field; PO-7712's own
+    value must be what RATCHET checks, not `config.TRACE_APPROVAL_THRESHOLD`
+    — proven in both directions, so this cannot pass by coincidentally
+    falling back to the global constant either way.
+
+    PO-7712 must actually be `delayed` for `find_disrupted_po` to name it —
+    `_elicit_claim` alone (the pattern most other tests in this file use)
+    deliberately leaves it `in_transit` (see
+    `test_orchestrator_does_not_mark_pos_delayed`), so this test sets the
+    status directly, mirroring what `POST /environment/inject/supplier_delay`
+    does in the real environment.
+    """
+    _elicit_claim(store)
+    store.purchase_orders["PO-7712"].status = "delayed"
+
+    # Direction 1: the PO's own threshold (100,000) sits BELOW the real
+    # COMP-104 plan cost (~123,674), while the global default (150,000)
+    # sits ABOVE it. If the global constant governed, this would EXECUTE;
+    # the PO's own field must force ESCALATE instead.
+    store.purchase_orders["PO-7712"].approval_required_above = 100_000.0
+    run_low = run_pipeline(store, component_id="COMP-104", now=NOW)
+    assert run_low.decision == "escalate"
+    assert "cost_above_threshold" in run_low.brief.triggers_fired
+    assert run_low.brief.approval_threshold == 100_000.0
+    assert run_low.brief.total_cost > 100_000.0
+
+    reset_orchestrator_state()
+    reset_plan_sequence()
+
+    # Direction 2: the PO's own threshold (200,000) sits ABOVE the plan
+    # cost, while the global default is monkeypatched BELOW it (60,000 —
+    # `_force_escalate`'s own value, already proven elsewhere in this file
+    # to trip `cost_above_threshold` on the real plan). If the global
+    # constant governed, this would ESCALATE; the PO's own field must let
+    # it EXECUTE.
+    store.purchase_orders["PO-7712"].approval_required_above = 200_000.0
+    _force_escalate(monkeypatch)
+    run_high = run_pipeline(store, component_id="COMP-104", now=NOW)
+    assert run_high.decision == "execute"
+    assert run_high.brief.triggers_fired == []
+    assert run_high.brief.approval_threshold == 200_000.0
+    assert run_high.awaiting_approval is False
 
 
 def test_provenance_cites_every_created_po(store):

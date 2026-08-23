@@ -10,18 +10,28 @@ execute-or-escalate. It never calls `POST /erp/update` itself — see
 "Scope boundary" below.
 
 --------------------------------------------------------------------------
-Three hard triggers — AGENTS.md rule 3, verbatim, all three, non-overridable
+Four hard triggers — AGENTS.md rule 3's three, verbatim and non-overridable,
+plus one added this session under the same discipline
 --------------------------------------------------------------------------
 "Cost above threshold, no supplier meets deadline, or quality risk →
 escalate. No confidence score overrides this and the LLM cannot argue past
-it." Implemented as three independent boolean checks, each reading only
-spec fields or values PLANNER/SOLVER already computed — nothing invented,
+it." Implemented as independent boolean checks, each reading only spec
+fields or values PLANNER/SOLVER already computed — nothing invented,
 nothing blended into a score:
 
 1. **`cost_above_threshold`** — `store.check_approval` (§5.8, the same tool
    `solver.py`'s hard filter already calls) run once against
-   `plan.total_cost`. Reused, not re-derived: this module does not
-   re-implement per-PO-vs-global threshold selection.
+   `plan.total_cost`, with the SAME `po_id` the caller resolved for that
+   hard filter (`app/api/routes.py::_walk`, via `planner.find_disrupted_po`)
+   passed straight through. Reused, not re-derived: this module does not
+   re-implement per-PO-vs-global threshold selection, and does not decide
+   which PO a plan is "about" — it reads whatever `po_id` it is given
+   (`None` included) and lets `Store.resolve_approval_threshold` do the
+   same per-PO-else-global resolution `check_approval` always did. The
+   DISPLAYED `approval_threshold` on the brief reads the exact same
+   resolution (see `run_ratchet`), so the number shown always matches the
+   one the decision was actually made against — never a global figure
+   narrating a per-PO decision, or vice versa.
 2. **`no_feasible_deadline_plan`** — `plan is None` (nothing survived
    HARD FILTER + Pareto at all) OR `plan.deadline_feasible is False`
    (PLANNER's own deadline hard-filter — item 5's correction [3] — found
@@ -37,6 +47,40 @@ nothing blended into a score:
    option fails quality" can be TRUE is when quality rejections wiped out
    the candidate pool entirely, leaving no plan. This is a factual read of
    `SolverResult.rejected`, not a new judgment call.
+4. **`production_shutdown_unavoidable`** — the real problem statement's
+   §4.9 lists this as its own condition ("Production shutdown is
+   unavoidable"), separate from "no supplier meets deadline." It is NOT the
+   same fact as `no_feasible_deadline_plan`: a plan can be
+   `deadline_feasible=True` (every high-priority order still reaches its
+   OWN final deadline) while still forcing a real, physical stretch of zero
+   usable stock BEFORE the earliest secured delivery lands — the line stops
+   for that window regardless of which plan is chosen, even though the
+   final deadline is still met once supply arrives. PLANNER's item 5b
+   (`_safety_stock_decision`) already computes exactly this: whether such a
+   gap exists (`triggered`), whether a safety-stock draw was attempted
+   (`drawn`/`draw_units`), and — the field this trigger actually reads —
+   `remaining_gap_days`: the portion of that gap NOT closed even after the
+   draw was considered (0.0 when a draw fully covers it; `gap_days` itself
+   when nothing was drawn at all; the difference for a partial draw capped
+   by a limited `safety_stock`). Fires when `remaining_gap_days > 0`. This
+   is a factual read of a value item 5b already computed for a different
+   purpose (whether to authorize a safety-stock draw) — RATCHET adds no new
+   math, just a threshold on an existing field, matching how the other
+   three triggers are pure reads.
+
+   **The judgment call, disclosed rather than silently made:** the real
+   spec does not define "unavoidable" numerically. The design decision here
+   is to treat ANY `remaining_gap_days > 0` as unavoidable — not a
+   magnitude cutoff (e.g. "only if the gap exceeds N days"), because
+   inventing a magnitude threshold with no spec basis is exactly the kind
+   of invented number AGENTS.md rule 7 forbids. The chosen reading is the
+   narrowest one that still needs no invented constant: "unavoidable" means
+   "every action this system is capable of taking — including drawing
+   safety stock — was already tried, by item 5b, before this trigger is
+   ever consulted, and a gap still remains." Nothing about WHICH gap sizes
+   count is decided here; a genuinely different call (e.g., escalate only
+   past some materiality threshold) would need its own spec basis, not one
+   invented after the fact.
 
 Any one trigger firing forces `decision = "escalate"`. Multiple triggers can
 fire together (e.g. a plan can be both over-threshold AND deadline-
@@ -110,7 +154,6 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-from app.config import TRACE_APPROVAL_THRESHOLD
 from app.engine.planner import CostOfInaction, Plan, RejectedAlternative
 from app.engine.solver import SolverResult
 from app.engine.verify import DETERMINISTIC_MODEL_VERSION
@@ -118,7 +161,12 @@ from app.environment.clock import clock
 from app.environment.schemas import ApprovalCheckRequest
 from app.environment.seed_data import STATE, Store
 
-EscalationTrigger = Literal["cost_above_threshold", "no_feasible_deadline_plan", "quality_risk"]
+EscalationTrigger = Literal[
+    "cost_above_threshold",
+    "no_feasible_deadline_plan",
+    "quality_risk",
+    "production_shutdown_unavoidable",
+]
 
 
 # ==========================================================================
@@ -167,13 +215,17 @@ def _evaluate_triggers(
     store: Store,
     plan: Optional[Plan],
     solver_result: SolverResult,
+    *,
+    po_id: Optional[str] = None,
 ) -> tuple[list[EscalationTrigger], int]:
     triggers: list[EscalationTrigger] = []
     approval_checks_made = 0
 
     if plan is not None:
         approval = store.check_approval(
-            ApprovalCheckRequest(action="ratchet_execute_plan", estimated_cost=plan.total_cost)
+            ApprovalCheckRequest(
+                action="ratchet_execute_plan", estimated_cost=plan.total_cost, po_id=po_id
+            )
         )
         approval_checks_made += 1
         if approval.approval_required:
@@ -184,6 +236,13 @@ def _evaluate_triggers(
 
     if plan is None and any(r.reason == "quality_below_threshold" for r in solver_result.rejected):
         triggers.append("quality_risk")
+
+    if (
+        plan is not None
+        and plan.safety_stock_decision.remaining_gap_days is not None
+        and plan.safety_stock_decision.remaining_gap_days > 0
+    ):
+        triggers.append("production_shutdown_unavoidable")
 
     return triggers, approval_checks_made
 
@@ -206,10 +265,11 @@ def _falsification_line(
         return (
             f"This executes because total_cost ({plan.total_cost:.2f}) is within "
             f"the {threshold:.0f} approval threshold, every high-priority production "
-            f"order reaches its own deadline under this plan, and {supplier_list} "
+            f"order reaches its own deadline under this plan, {supplier_list} "
             "passed the certification and quality-score hard filter before ever "
-            "being quoted. It would be wrong to execute if "
-            f"{chosen.supplier_ids[0]}'s reliability_score "
+            "being quoted, and no physical stockout gap remains unclosed after "
+            "the safety-stock draw was considered. It would be wrong to execute "
+            f"if {chosen.supplier_ids[0]}'s reliability_score "
             f"({chosen.reliability_score}) does not hold in practice — e.g. a "
             "future verification cycle finds one of its claims contradicted — or "
             f"if {threshold:.0f} is not actually the correct approval threshold for "
@@ -248,6 +308,19 @@ def _falsification_line(
             "component's required threshold"
         )
         reversals.append("a supplier's quality_score was recorded incorrectly")
+
+    if "production_shutdown_unavoidable" in triggers and plan is not None:
+        ssd = plan.safety_stock_decision
+        clauses.append(
+            f"even after the safety-stock draw was considered, a "
+            f"{ssd.remaining_gap_days:.1f}-day physical stockout gap remains "
+            "before the earliest secured delivery arrives — production stops "
+            "for that window regardless of which plan is chosen"
+        )
+        reversals.append(
+            "the earliest secured delivery date or the on-hand usable_stock "
+            "figure this gap was computed from turns out to be wrong"
+        )
 
     reason_text = "; ".join(clauses)
     reversal_text = ", or ".join(reversals) if reversals else "the underlying data has changed"
@@ -294,6 +367,20 @@ def _narrate_deterministic(brief_facts: "_BriefFacts") -> str:
             )
         else:
             lines.append("Cost delta vs baseline: not available (no disrupted PO identified).")
+
+        ssd = brief_facts.plan.safety_stock_decision
+        if ssd.remaining_gap_days:
+            lines.append(
+                f"Physical stockout gap: {ssd.remaining_gap_days:.1f} day(s) remain "
+                f"unclosed even after the safety-stock draw — {ssd.reason}"
+            )
+        elif ssd.triggered:
+            lines.append(
+                f"Physical stockout gap: {ssd.gap_days:.1f} day(s), fully closed by "
+                f"drawing {ssd.draw_units} safety-stock units."
+            )
+        else:
+            lines.append("Physical stockout gap: none.")
 
         if brief_facts.cost_of_inaction and brief_facts.cost_of_inaction.production_orders_at_risk:
             lines.append("Production orders at risk if this plan is not executed:")
@@ -373,6 +460,7 @@ def run_ratchet(
     plan: Optional[Plan],
     solver_result: SolverResult,
     *,
+    po_id: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> DecisionBrief:
     """HARD FILTER, SOLVER (item 4) and PLAN (item 5) already ran; this is
@@ -382,14 +470,28 @@ def run_ratchet(
     `plan` may be `None` (nothing survived hard filter + Pareto at all,
     per item 5's own contract) — `run_ratchet` handles that case as a
     guaranteed escalation, not a crash.
+
+    `po_id` — §5.2's `approval_required_above` is a PER-PO field, not a
+    single global rule. The caller (`app/api/routes.py::_walk`, via
+    `find_disrupted_po`) resolves which PO this decision is actually about
+    and passes its id here; `None` when no delayed PO exists for this
+    component, or when a caller (a unit test, `baseline.py`'s variants)
+    doesn't supply one — either way `store.resolve_approval_threshold`
+    falls back to the global `config.TRACE_APPROVAL_THRESHOLD` exactly as
+    it always did.
     """
     store = STATE if store is None else store
     now = clock.now() if now is None else now
 
-    triggers, approval_checks_made = _evaluate_triggers(store, plan, solver_result)
+    triggers, approval_checks_made = _evaluate_triggers(store, plan, solver_result, po_id=po_id)
     decision: Literal["execute", "escalate"] = "escalate" if triggers else "execute"
 
-    threshold = TRACE_APPROVAL_THRESHOLD
+    # Read live off `Store.resolve_approval_threshold` — the SAME resolution
+    # `store.check_approval` just used, above, to decide `cost_above_threshold`
+    # — not a second, independent lookup (module-level import OR a
+    # freshly-hand-rolled po_id/global choice here) that could silently
+    # diverge from the one the decision actually used.
+    threshold = store.resolve_approval_threshold(po_id)
     falsification = _falsification_line(decision, triggers, plan, threshold)
 
     cost_delta = None

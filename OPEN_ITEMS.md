@@ -2,6 +2,57 @@
 
 Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.md.
 
+## Signed off — §4.9's five escalation conditions, real problem statement now on disk (2026-08-23)
+
+Checked `ratchet.py`'s triggers against the real `problemstatement.md` §4.9
+(five conditions). Three were already covered; a fourth (`production_shutdown_
+unavoidable`) was a real gap and is now wired in; the fifth ("multiple options
+have serious trade-offs") is a closed Standing Decision — see PROJECT.md §7 —
+not left open here.
+
+- [x] **`production_shutdown_unavoidable` added as RATCHET's fourth trigger.**
+      `planner.py`'s `SafetyStockDecision` gained an additive
+      `remaining_gap_days` field (0.0 when a safety-stock draw fully closes
+      the physical gap before the earliest secured delivery; the uncovered
+      remainder otherwise; `None` when no gap ever existed) — `run_ratchet`
+      fires this trigger when `remaining_gap_days > 0`, reusing item 5b's own
+      computation rather than re-deriving the gap math. Distinct from
+      `no_feasible_deadline_plan`: a plan can be `deadline_feasible=True` (the
+      FINAL deadline is still met) while still forcing a real physical
+      stockout window before relief arrives. The design call — treating ANY
+      `remaining_gap_days > 0` as "unavoidable" rather than a magnitude
+      cutoff, since the real spec gives no number to calibrate one against
+      (AGENTS.md rule 7) — is disclosed in `ratchet.py`'s own module
+      docstring. Tested both directions:
+      `tests/test_ratchet.py::test_trigger_production_shutdown_unavoidable_fires_when_a_real_gap_remains`
+      and `..._does_not_fire_when_the_draw_fully_closes_the_gap`.
+
+## Signed off — `approval_required_above` (§5.2, per-PO) is now threaded through the live pipeline
+
+Was dead data: `Store.check_approval` already resolved a named PO's own
+threshold when given one, but `run_pipeline`/`run_solver`/`run_ratchet` never
+passed a `po_id` — every live decision silently fell back to the global
+`config.TRACE_APPROVAL_THRESHOLD`.
+
+- [x] **Fixed.** `planner.find_disrupted_po(store, component_id)` — the SAME
+      "which delayed PO is this about" lookup `_baseline_unit_price` already
+      used for cost-of-inaction baselining, refactored into a shared,
+      public function — is now the single resolution reused by
+      `app/api/routes.py::_walk` (threading `po_id` into both `run_solver`'s
+      hard filter and `run_ratchet`'s cost check) and by
+      `_current_approval_threshold` (the staleness comparison). `Store.
+      resolve_approval_threshold(po_id)` is the one place the per-PO-else-
+      global rule is implemented; `check_approval` and RATCHET's displayed
+      `approval_threshold` both call it, so the number shown always matches
+      the one the decision used. Multi-PO-per-component tie-break: the same
+      one `_baseline_unit_price` already used (minimum `unit_price` among a
+      component's delayed POs) — one answer to "which PO," not two rules that
+      could disagree. Tested bidirectionally (a PO threshold below the global
+      forces escalate; a PO threshold above the global, with the global
+      monkeypatched low, still executes) in
+      `tests/test_orchestrator.py::test_disrupted_pos_own_approval_threshold_is_what_ratchet_actually_checks`.
+      Full suite: 377 passed, both `TRACE_LLM_ENABLED` modes.
+
 ## Signed off — Item 13 (Multi-baseline comparison harness) built and verified
 
 - [x] **Item 13 shipped.** Multi-baseline comparison harness (`app/engine/baseline.py` + `POST /baseline/compare/{scenario_name}`) built as config flags on the existing pipeline (`variant` parameter in `run_pipeline`).

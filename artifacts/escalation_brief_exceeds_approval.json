@@ -6,7 +6,7 @@
   "triggers_fired": [
     "cost_above_threshold"
   ],
-  "approval_threshold": 150000.0,
+  "approval_threshold": 50000.0,
   "total_cost": 123614.0,
   "cost_delta_vs_baseline": null,
   "cost_increase_vs_baseline_pct": null,
@@ -114,7 +114,8 @@
       "drawn": false,
       "draw_units": 0,
       "reason": "On-hand coverage (respecting the safety_stock reserve) already gets every order to its deadline \u2014 no gap to bridge.",
-      "worsened_orders": []
+      "worsened_orders": [],
+      "remaining_gap_days": null
     },
     "deadline_feasible": true,
     "total_cost": 123614.0,
@@ -179,8 +180,8 @@
     "baseline_total_cost": null,
     "baseline_note": "No delayed purchase order found for this component -- there is no identifiable pre-disruption baseline price to compare against, so cost_increase_vs_baseline_pct is not computed. Not the same as inventing one (AGENTS.md rule 7): a percentage needs a real prior price to be a percentage OF; absent a disrupted PO, there is nothing that claims a disruption happened to this component at all."
   },
-  "falsification_line": "This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.",
-  "narration": "DECISION: ESCALATE \u2014 COMP-104\n\nTriggers fired: cost_above_threshold\n\nChosen plan PLAN-0002: SUP-37 (450) + SUP-42 (500), total_cost 123614.00 (approval threshold 150000).\nCost delta vs baseline: not available (no disrupted PO identified).\nProduction orders at risk if this plan is not executed:\n  - PROD-882 (high priority): 460 units unbuilt, never fully supplied by this plan.\n  - PROD-914 (low priority): 250 units unbuilt, never fully supplied by this plan.\nRejected alternatives:\n  - SUP-18 [quality_below_threshold]: saved -21014.00 \u2014 SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call.\n  - SUP-21 [budget_infeasible]: saved -64614.00 \u2014 SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) \u2014 dropped before spending an RFQ call.\n\nFalsification: This escalates because total_cost (123614.00) exceeds the 150000 approval threshold. It would be wrong to escalate if the 150000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.",
+  "falsification_line": "This escalates because total_cost (123614.00) exceeds the 50000 approval threshold. It would be wrong to escalate if the 50000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.",
+  "narration": "DECISION: ESCALATE \u2014 COMP-104\n\nTriggers fired: cost_above_threshold\n\nChosen plan PLAN-0002: SUP-37 (450) + SUP-42 (500), total_cost 123614.00 (approval threshold 50000).\nCost delta vs baseline: not available (no disrupted PO identified).\nPhysical stockout gap: none.\nProduction orders at risk if this plan is not executed:\n  - PROD-882 (high priority): 460 units unbuilt, never fully supplied by this plan.\n  - PROD-914 (low priority): 250 units unbuilt, never fully supplied by this plan.\nRejected alternatives:\n  - SUP-18 [quality_below_threshold]: saved -21014.00 \u2014 SUP-18's quality_score (0.71) is below COMP-104's required threshold (0.85) \u2014 dropped before spending an RFQ call.\n  - SUP-21 [budget_infeasible]: saved -64614.00 \u2014 SUP-21's minimum order (500 units @ 118.0) costs 59000, which already needs approval (Cost exceeds autonomous purchase threshold of 50000) \u2014 dropped before spending an RFQ call.\n\nFalsification: This escalates because total_cost (123614.00) exceeds the 50000 approval threshold. It would be wrong to escalate if the 50000 threshold used here is not the correct one, or if the underlying deadline/threshold/quality data has changed since this was computed.",
   "narrated_by": "deterministic",
   "model_version": "deterministic",
   "approval_checks_made": 1

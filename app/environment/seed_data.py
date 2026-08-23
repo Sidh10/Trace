@@ -665,16 +665,26 @@ class Store:
         self.rfq_log.extend(quotes)
         return quotes
 
-    def check_approval(self, req: ApprovalCheckRequest) -> ApprovalCheckResponse:
-        """§5.8. Threshold comes from the named PO when given, else the
-        global autonomous purchase threshold (config.TRACE_APPROVAL_THRESHOLD,
-        default 150000 — matches the spec's own example)."""
+    def resolve_approval_threshold(self, po_id: Optional[str] = None) -> float:
+        """The single source of truth for "what threshold governs this
+        decision" — §5.8's own rule: the named PO's `approval_required_above`
+        when one is given and known, else the global autonomous purchase
+        threshold (config.TRACE_APPROVAL_THRESHOLD, default 150000 —
+        matches the spec's own example). `check_approval` calls this rather
+        than resolving the threshold itself so a caller that needs the
+        NUMBER without running a full approval check (RATCHET's displayed
+        threshold, staleness's "has this changed" comparison) reads the
+        exact same resolution, never a second copy that can drift from it."""
         from app.config import TRACE_APPROVAL_THRESHOLD  # local import avoids a cycle
 
-        threshold = TRACE_APPROVAL_THRESHOLD
-        if req.po_id and req.po_id in self.purchase_orders:
-            threshold = self.purchase_orders[req.po_id].approval_required_above
+        if po_id and po_id in self.purchase_orders:
+            return self.purchase_orders[po_id].approval_required_above
+        return TRACE_APPROVAL_THRESHOLD
 
+    def check_approval(self, req: ApprovalCheckRequest) -> ApprovalCheckResponse:
+        """§5.8. Threshold comes from the named PO when given, else the
+        global autonomous purchase threshold — see `resolve_approval_threshold`."""
+        threshold = self.resolve_approval_threshold(req.po_id)
         approval_required = req.estimated_cost > threshold
         reason = None
         if approval_required:

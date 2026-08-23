@@ -231,6 +231,7 @@ from app.engine.coverage import CoverageStatus
 from app.engine.coverage import _classify as _coverage_classify
 from app.engine.solver import DropReason, Rejection, SolverResult, SourcingCombination
 from app.environment.clock import clock
+from app.environment.schemas import PurchaseOrder
 from app.environment.seed_data import STATE, Store
 
 # §5.4's priority field has no inherent numeric order — this is the one place
@@ -314,6 +315,15 @@ class SafetyStockDecision(BaseModel):
     draw_units: int = 0
     reason: str
     worsened_orders: list[str] = []  # non-empty only when drawn=False because of them
+    # ADDITIVE — RATCHET's `production_shutdown_unavoidable` trigger reads
+    # this directly rather than re-deriving "was the gap actually closed"
+    # from `gap_days`/`draw_units`/`daily_usage` a second time. `None` when
+    # `triggered=False` (no gap ever existed); `gap_days` verbatim when
+    # `drawn=False` (nothing closed it at all, whether because there was
+    # nothing to draw or because drawing was refused for worsening another
+    # order); `gap_days - covered_days` when `drawn=True` (0.0 for a draw
+    # that fully covers the gap, positive for one that only partially does).
+    remaining_gap_days: Optional[float] = None
 
 
 class AllocationDetail(BaseModel):
@@ -723,6 +733,7 @@ def _safety_stock_decision(
                 f"before the earliest secured delivery, but safety_stock is "
                 f"{safety_stock} — nothing available to draw."
             ),
+            remaining_gap_days=round(gap_days, 1),
         )
 
     usable_stock_after = usable_stock - draw_units
@@ -767,6 +778,7 @@ def _safety_stock_decision(
                 "with a footnote (see module docstring's 'Item 5b' section)."
             ),
             worsened_orders=sorted(worsened),
+            remaining_gap_days=round(gap_days, 1),
         )
 
     covered_days = min(gap_days, draw_units / daily_usage)
@@ -787,6 +799,15 @@ def _safety_stock_decision(
             f"{', '.join(affected)}. No other order's on-hand-only "
             "classification worsens as a result."
         ),
+        # round(..., 1) here is not cosmetic: when the draw fully covers the
+        # gap, `covered_days` is `min()` returning `gap_days` itself, so this
+        # subtraction is exact float 0.0, not near-zero noise — and even in
+        # the rare case where independent float rounding on each side leaves
+        # a residual (checked empirically: worst case found across a wide
+        # integer sweep was ~7e-15), rounding to 1 decimal absorbs anything
+        # that small, well before RATCHET's `> 0` trigger check ever reads
+        # the STORED, already-rounded value.
+        remaining_gap_days=round(gap_days - covered_days, 1),
     )
 
 
@@ -861,14 +882,21 @@ def _rejected_alternatives(
 # ==========================================================================
 
 
-def _baseline_unit_price(store: Store, component_id: str) -> Optional[float]:
-    """The price already committed to before the disruption — a delayed
-    PO's own contracted `unit_price`. "Baseline = the plan cost had no
-    disruption occurred" read literally: the specific PO whose delay
-    created this shortfall is exactly what "no disruption" would have cost.
-    `None` when no delayed PO exists for this component — see
-    `NO_BASELINE_NOTE`. The minimum, when several: the best price the
-    disruption is actually costing us against."""
+def find_disrupted_po(store: Store, component_id: str) -> Optional[PurchaseOrder]:
+    """The delayed PO "this disruption is about," for this component — one
+    canonical lookup reused everywhere the question "which PO's own
+    fields (contracted price, `approval_required_above`) govern this
+    decision" comes up: baseline pricing here, and RATCHET's/SOLVER's
+    approval-threshold resolution (`app/api/routes.py::_disrupted_po_id`).
+    Answered once so the two can never silently disagree on which PO that
+    is.
+
+    `None` when no delayed PO exists for this component. The minimum
+    unit_price, when several: the same tie-break `_baseline_unit_price`
+    always used — "the best price the disruption is actually costing us
+    against" — now also the PO whose own approval authority applies,
+    rather than inventing a second, possibly different rule for the same
+    question."""
     delayed = [
         po
         for po in store.list_purchase_orders(component_id=component_id)
@@ -876,7 +904,18 @@ def _baseline_unit_price(store: Store, component_id: str) -> Optional[float]:
     ]
     if not delayed:
         return None
-    return min(po.unit_price for po in delayed)
+    return min(delayed, key=lambda po: po.unit_price)
+
+
+def _baseline_unit_price(store: Store, component_id: str) -> Optional[float]:
+    """The price already committed to before the disruption — a delayed
+    PO's own contracted `unit_price`. "Baseline = the plan cost had no
+    disruption occurred" read literally: the specific PO whose delay
+    created this shortfall is exactly what "no disruption" would have cost.
+    `None` when no delayed PO exists for this component — see
+    `NO_BASELINE_NOTE`."""
+    po = find_disrupted_po(store, component_id)
+    return po.unit_price if po is not None else None
 
 
 def _compute_cost_of_inaction(

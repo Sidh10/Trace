@@ -274,7 +274,7 @@
     {
       "assumption_id": "ASSUM-0004",
       "subject_node": "brief:PLAN-0001",
-      "statement": "This executes because total_cost (123674.00) is within the 150000 approval threshold, every high-priority production order reaches its own deadline under this plan, and SUP-37, SUP-42 passed the certification and quality-score hard filter before ever being quoted. It would be wrong to execute if SUP-37's reliability_score (0.81) does not hold in practice \u2014 e.g. a future verification cycle finds one of its claims contradicted \u2014 or if 150000 is not actually the correct approval threshold for this specific purchase.",
+      "statement": "This executes because total_cost (123674.00) is within the 150000 approval threshold, every high-priority production order reaches its own deadline under this plan, SUP-37, SUP-42 passed the certification and quality-score hard filter before ever being quoted, and no physical stockout gap remains unclosed after the safety-stock draw was considered. It would be wrong to execute if SUP-37's reliability_score (0.81) does not hold in practice \u2014 e.g. a future verification cycle finds one of its claims contradicted \u2014 or if 150000 is not actually the correct approval threshold for this specific purchase.",
       "source_module": "ratchet",
       "source_field": "DecisionBrief.falsification_line",
       "model_version": "deterministic",

@@ -1,10 +1,11 @@
 import json
 from datetime import datetime, timezone
+from app.environment import seed_data
 from app.environment.seed_data import build_store
 from app.engine.coverage import compute_coverage
 from app.engine.monitor import run_monitor_cycle
 from app.engine.verify import run_verification_cycle
-from app.api.routes import run_pipeline, resolve_approval
+from app.api.routes import run_pipeline, resolve_approval, reset_orchestrator_state
 from app.environment.routes import inject_scenario
 from app import config
 
@@ -21,11 +22,12 @@ def run_demo_rehearsal():
     # ----------------------------------------------------------------------
     print("\n--- BEAT 1: AT REST BOARD ---")
     store = build_store()
+    seed_data.STATE = store
     cov1 = compute_coverage(store, now=now)
     healthy_count = sum(1 for r in cov1.results if r.status == "healthy")
     critical_count = sum(1 for r in cov1.results if r.status == "critical")
     at_risk_count = sum(1 for r in cov1.results if r.status == "at_risk")
-    
+
     print(f"Total Production Orders: {len(cov1.results)}")
     print(f"Status Breakdown: {healthy_count} Healthy, {at_risk_count} At-Risk, {critical_count} Critical")
     for r in cov1.results:
@@ -72,10 +74,24 @@ def run_demo_rehearsal():
     print(f"Chosen Combination: {[m.supplier_id for m in brief_def.chosen_plan.chosen_combination.members]} split")
     print(f"Total Cost: RS {brief_def.total_cost:,.2f} (vs threshold RS {brief_def.approval_threshold:,.2f})")
     print(f"Reschedule Actions Count: {len(brief_def.chosen_plan.reschedule_actions())}")
-    print(f"ERP Writes Made: {len(run_default.erp_writes)}")
+    print(f"ERP Writes Made: {len(run_default.erp_writes)} (1 store_plan decision record + {len(brief_def.chosen_plan.purchase_actions())} create_alternate_po, one per supplier in the split)")
+    for w in run_default.erp_writes:
+        action_type = w.action.get('type') if isinstance(w.action, dict) else getattr(w.action, 'type', 'N/A')
+        print(f"  * ERP Update ({w.update_id}): Action={action_type}")
 
+    # BEAT 4B runs on its own fresh store/environment (Scenario 5's low
+    # approval threshold is a separate judge-triggered disruption, not a
+    # continuation of Beat 4A). `inject_scenario()` always mutates
+    # `seed_data.STATE`, so STATE must point at store5 before the injection
+    # for it to land on the store this beat actually pipes through; and
+    # `reset_orchestrator_state()` must run first, or `run_pipeline` treats
+    # store5 as a continuation of Beat 4A's cached "COMP-104" run (same
+    # component_id, different store) and replays/re-enters against the
+    # wrong prior instead of solving store5 fresh.
     print("\n--- BEAT 4B: JUDGE SCENARIO 5 (EXCEEDS APPROVAL: THRESHOLD 50,000) ---")
     store5 = build_store()
+    seed_data.STATE = store5
+    reset_orchestrator_state()
     store5.send_supplier_message(
         supplier_id="SUP-21",
         to="supplier21@example.com",
@@ -106,13 +122,38 @@ def run_demo_rehearsal():
         print(f"  * ERP Update Executed ({w.update_id}): Action={w.action.get('type') if isinstance(w.action, dict) else getattr(w.action, 'type', 'N/A')}")
 
     # ----------------------------------------------------------------------
-    # BEAT 6: Staleness Detection & Bounded Loop Re-entry
+    # BEAT 6A: Staleness Detection & Bounded Loop Re-entry
     # ----------------------------------------------------------------------
+    # A genuine two-pass demonstration of item 8, on its own fresh store6 —
+    # same isolation reasoning as Beat 4B. Pass 1 plans against what the ERP
+    # believes at that moment (PO-7712 delayed, stock not yet corrected).
+    # Only THEN do we apply the warehouse correction (`stale_erp`: ERP
+    # overstates current_stock relative to what the warehouse actually has
+    # usable) and re-run — that is what gives the staleness detector
+    # something real to catch, and it is store6's own prior plan that gets
+    # superseded, not a plan carried over from a different beat's store.
     print("\n--- BEAT 6A: STALENESS DETECTION & BOUNDED RE-ENTRY ---")
+    # Beat 4B's `exceeds_approval` injection left the threshold at 50,000 for
+    # the rest of the process (same leftover-global issue as Beat 6B below).
+    # Beat 6A is demonstrating staleness/re-entry, not the low-threshold
+    # scenario, so it needs the default threshold restored or its own plan
+    # escalates on the wrong basis.
+    config.TRACE_APPROVAL_THRESHOLD = 150000.0
     store6 = build_store()
+    seed_data.STATE = store6
+    reset_orchestrator_state()
+    store6.purchase_orders["PO-7712"].status = "delayed"
+    run_initial = run_pipeline(store6, component_id="COMP-104", now=now)
+    print(f"Pass 1 (pre-correction) Plan ID: {run_initial.brief.plan_id}, Decision: {run_initial.decision.upper()}")
+
     inject_scenario("stale_erp")
-    print("Explanation: `PLAN-0002` was the initial plan executed on pass 1 for store6. Upon detecting inventory staleness, the orchestrator re-entered planning and generated `PLAN-0003` to supersede it.")
     run_stale = run_pipeline(store6, component_id="COMP-104", now=now)
+    print(
+        f"Explanation: `{run_initial.brief.plan_id}` was the plan store6 executed on pass 1, "
+        "before the warehouse-vs-ERP stock mismatch was known. Once the correction "
+        f"landed, the orchestrator detected the contradiction and re-entered planning, "
+        f"generating `{run_stale.brief.plan_id}` to supersede it."
+    )
     print(f"Post-Replan Verified: {run_stale.post_replan_verified}")
     print(f"Reentered at Stage: {run_stale.reentered_at_stage}")
     print(f"Stages Executed Trail: {run_stale.stages}")
@@ -132,6 +173,13 @@ def run_demo_rehearsal():
     print(f"   Verdict: {ta.necessity_verdict}")
 
     print("\n3. MULTI-BASELINE HARNESS COMPARISON (ITEM 13):")
+    # Beat 4B's `exceeds_approval` injection left config.TRACE_APPROVAL_THRESHOLD
+    # at 50,000 for the rest of the process. Left uncorrected, every variant
+    # below escalates on that leftover threshold instead of its own plan cost,
+    # which erases the differentiation this harness exists to show (e.g.
+    # cheapest_always finding a cheaper, lower-quality plan than trace) and
+    # makes all five variants print identical "escalate / RS 0.00" rows.
+    config.TRACE_APPROVAL_THRESHOLD = 150000.0
     from app.engine.baseline import run_baseline_comparison
     base = run_baseline_comparison("supplier_delay", now=now)
     for v_name, summary in base.variants.items():
