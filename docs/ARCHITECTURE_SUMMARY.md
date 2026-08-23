@@ -14,7 +14,8 @@ flowchart TD
     
     subgraph Sensing & Verification
         COVERAGE -->|Days of Coverage & Shortfalls| MONITOR[2. Monitor Cycle]
-        MONITOR -->|Load-bearing PO Polls & Disruption Events| VERIFY[3. Verification Engine]
+        MONITOR -->|Load-bearing PO Polls| TOOLGATE[Tool Gate Precondition Check]
+        TOOLGATE -->|Disruption Events| VERIFY[3. Verification Engine]
         VERIFY -->|Carrier Telemetry vs Supplier Claims| PROVENANCE[Provenance-Based Reliability Update]
     end
 

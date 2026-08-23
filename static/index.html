@@ -661,6 +661,11 @@
         activeInjections.push(data);
         renderScenarioLog();
         fetchCoverageBoard();
+
+        // Immediately trigger the TRACE control loop (POST /agent/handle-event)
+        const targetComponent = data.target_component || document.getElementById('component-select').value || 'COMP-104';
+        document.getElementById('component-select').value = targetComponent;
+        await runAgent();
       } catch (e) {
         alert('Scenario injection failed: ' + e);
       }

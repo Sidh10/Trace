@@ -43,6 +43,8 @@ team needs to know within the first hour, not the twelfth.
 A bounded loop — not a straight pipeline, not an open agent loop. See
 AGENTS.md rule 6 for why both of those fail.
 
+*(Note: [docs/ARCHITECTURE_SUMMARY.md](file:///d:/Genesis/project/docs/ARCHITECTURE_SUMMARY.md) is the canonical submission document containing the matching Mermaid rendering of this exact control-flow pipeline.)*
+
 ```
    ┌──────────────────────────────────────────────────────────────┐
    │  SIMULATED ENVIRONMENT (ours, spec schemas verbatim)          │
