@@ -2,6 +2,41 @@
 
 Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.md.
 
+## Disclosed tradeoff — the coverage board duplicates `compute_coverage()`'s math client-side, not a shared endpoint
+
+`static/index.html`'s Coverage Board recomputes days-of-coverage in JS
+(`daysBetween` / `trajectory` / `firstDayBelow` / `classify`) instead of
+calling a backend endpoint that returns `compute_coverage()`'s real output —
+there isn't one; item 12 (the board) was built as a client-only view over
+the existing §5 read endpoints (`/production-schedule`, `/inventory`,
+`/purchase-orders`, `/clock`), not a new coverage-specific route. The two
+implementations are therefore two copies of the same algorithm, with
+nothing structural stopping them from silently drifting apart.
+
+Audited directly rather than assumed: injected all nine judge-panel
+scenarios, ran both implementations against the identical raw data for
+every production order (63 comparisons total), and diffed
+`days_of_coverage` / `days_of_coverage_on_hand` / `status`. **All 9 agree**
+— worst observed float-level difference 0.044 days (display-rounds
+identically), zero status mismatches.
+
+- [x] **Insurance added, not a redesign.** Given all 9 already agree, and
+      exposing a new `GET /coverage` endpoint returning
+      `compute_coverage()` directly this close to submission is a real,
+      deliberate design change (a second API surface for the same data, a
+      frontend rewrite to consume it) rather than a bug fix — not done
+      unilaterally. Instead:
+      `tests/test_coverage_board_js_parity.py` extracts the frontend's own
+      math functions VERBATIM from `static/index.html` (not a hand-copied
+      duplicate that could itself drift), runs them under Node against
+      `compute_coverage()`'s real output for all nine scenarios, and fails
+      loudly — naming the exact scenario/order/field — the moment the two
+      implementations disagree. Skips (does not fail) when `node` isn't on
+      PATH, so this asserts JS/Python parity, not that Node is installed
+      everywhere this suite runs. If this ever fires, THAT is the moment to
+      decide between fixing the JS copy and finally building the shared
+      endpoint — not before, and not silently.
+
 ## Signed off — §4.9's five escalation conditions, real problem statement now on disk (2026-08-23)
 
 Checked `ratchet.py`'s triggers against the real `problemstatement.md` §4.9
