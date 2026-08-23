@@ -69,7 +69,7 @@ python -m pytest
 $env:TRACE_LLM_ENABLED="true"
 python -m pytest
 ```
-*Current benchmark: 373 passed (1.46s deterministic mode / 1.43s Gemini mode).*
+*Current benchmark: 378 passed (2.42s deterministic mode / 3.90s Gemini mode).*
 
 ---
 
