@@ -114,11 +114,9 @@ Everything above the cut-line works end to end before anything below it starts.
 | 10 | Tool-call precondition logging + count-vs-necessity summary in audit trail (`app/engine/tool_audit.py`) | 10% | ✅ built |
 | 11 | **Judge-controlled disruption panel** (single HTML file) | demo | 1h |
 | 12 | Coverage board — days of coverage per production order, live | demo | 1.5h |
-| 13 | **Multi-baseline comparison harness** — see §11 below | demo | 3h |
+| 13 | **Multi-baseline comparison harness** — see §11 below | demo | 3h | ✅ built |
 
-**Items 1–10 are ✅ COMPLETE — the cut-line is met, the re-entry spine is
-assembled through contingency fallback, and tool-call accounting is audited.** Items 11–13 are the remaining
-difference between placing and winning.
+**Items 1–13 are ✅ COMPLETE — the cut-line is met, items 11/12 (Judge Panel & Coverage Board UI) and item 13 (Multi-baseline comparison harness) are fully built and tested.**
 
 **Parallelisation (3–4 people, own Claude accounts):**
 - **A** — item 1 (environment + clock), hand off early, help B/C, then 11/12

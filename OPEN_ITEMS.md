@@ -2,6 +2,17 @@
 
 Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.md.
 
+## Signed off — Item 13 (Multi-baseline comparison harness) built and verified
+
+- [x] **Item 13 shipped.** Multi-baseline comparison harness (`app/engine/baseline.py` + `POST /baseline/compare/{scenario_name}`) built as config flags on the existing pipeline (`variant` parameter in `run_pipeline`).
+  - Core variants built: `static_workflow`, `cheapest_always`, `retry_only`, `trace` (control).
+  - Bonus ablation mode built: `claim_ablation`.
+  - Reports per variant: `days_of_coverage_protected`, `total_spend`, `hidden_tests_passed`, `tool_calls` (item 10 ToolAuditReport), `silent_failure` (ground-truth evaluation), `summary_sentence`.
+  - Smoke test: PO-7712 disruption fired through all variants, proving `static_workflow`, `cheapest_always`, `retry_only`, and `claim_ablation` all report a silent failure (`silent_failure=True`) while `trace` protects 5.56 days of coverage with 0 silent failures (`silent_failure=False`).
+  - AST checks passed: 0 invented metrics, 0 banned terms, 0 LLM in variant/comparison logic.
+  - Both `TRACE_LLM_ENABLED=true` and `TRACE_LLM_ENABLED=false` modes pass 100% of 373 tests.
+  - **COORDINATION NOTE:** This session (Item 13 backend session) touched `app/api/routes.py` LAST to add `variant` parameter to `run_pipeline` and expose `POST /baseline/compare/{scenario_name}`. If another session edits `routes.py`, pull and merge carefully before committing.
+
 ## Needs a call — Plan shape: reversibility moved per-action
 
 - [ ] ARCHITECTURE.md §7's `Plan` shape previously had ONE `reversibility`
