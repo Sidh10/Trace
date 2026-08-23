@@ -559,52 +559,100 @@
       }
     }
 
+    const EPS = 1e-9;
+    function daysBetween(d1, d2) { return (d2 - d1) / (1000 * 86400); }
+    function trajectory(opening_stock, daily_usage, arrivals) {
+      let segments = [];
+      let t = 0.0;
+      let stock = Number(opening_stock);
+      if (daily_usage <= 0) return { segments, depleted_at: Infinity };
+      let sortedArrivals = [...arrivals].sort((a, b) => a[0] - b[0]);
+      for (let [day, qty] of sortedArrivals) {
+        if (day <= t) { stock += qty; continue; }
+        let depleted_at = t + stock / daily_usage;
+        if (depleted_at <= day) {
+          segments.push([t, stock, depleted_at, 0.0]);
+          return { segments, depleted_at };
+        }
+        let end_stock = stock - daily_usage * (day - t);
+        segments.push([t, stock, day, end_stock]);
+        stock = end_stock + qty;
+        t = day;
+      }
+      let depleted_at = t + stock / daily_usage;
+      segments.push([t, stock, depleted_at, 0.0]);
+      return { segments, depleted_at };
+    }
+    function firstDayBelow(segments, level) {
+      for (let [t0, s0, t1, s1] of segments) {
+        if (s0 < level - EPS) return t0;
+        if (s1 < level - EPS) {
+          let drop = s0 - s1;
+          if (drop <= 0) return t0;
+          return t0 + ((s0 - level) / drop) * (t1 - t0);
+        }
+      }
+      return Infinity;
+    }
+    function classify(days_of_coverage, days_to_safety_breach, days_to_deadline) {
+      if (days_to_deadline <= 0) return 'critical';
+      if (days_of_coverage < days_to_deadline - EPS) return 'critical';
+      if (days_to_safety_breach < days_to_deadline - EPS) return 'at_risk';
+      return 'healthy';
+    }
+
     async function fetchCoverageBoard() {
       try {
-        const res = await fetch('/production-schedule');
-        const orders = await res.json();
-
-        // Fetch inventory to compute on-hand days
-        const invRes = await fetch('/inventory');
+        const [ordersRes, invRes, poRes, clockRes] = await Promise.all([
+          fetch('/production-schedule'),
+          fetch('/inventory'),
+          fetch('/purchase-orders'),
+          fetch('/clock')
+        ]);
+        const orders = await ordersRes.json();
         const invList = await invRes.json();
+        const poList = await poRes.json();
+        const clockData = await clockRes.json();
+
+        const now = new Date(clockData.now);
         const invMap = {};
         invList.forEach(i => invMap[i.component_id] = i);
+
+        const poMap = {};
+        poList.forEach(po => {
+          if (po.status === 'pending' || po.status === 'in_transit') {
+            if (!poMap[po.component_id]) poMap[po.component_id] = [];
+            const arrivalOffset = daysBetween(now, new Date(po.expected_delivery + 'T00:00:00Z'));
+            poMap[po.component_id].push([arrivalOffset, po.quantity]);
+          }
+        });
 
         const tbody = document.getElementById('coverage-tbody');
         tbody.innerHTML = '';
 
-        // Now compute days for each production order
-        const now = new Date('2026-09-01T08:00:00Z');
-
         orders.forEach(ord => {
           const inv = invMap[ord.required_component] || {};
-          const dailyUsage = inv.daily_usage || 1;
           const usableStock = inv.usable_stock || 0;
-          const onHandDays = (usableStock / dailyUsage).toFixed(1);
+          const dailyUsage = inv.daily_usage || 0;
+          const safetyStock = inv.safety_stock || 0;
+          const arrivals = poMap[ord.required_component] || [];
 
-          // Deadline calculation
-          const dDate = new Date(ord.deadline);
-          const diffDays = Math.max(0, ((dDate - now) / (1000 * 3600 * 24))).toFixed(1);
+          const traj = trajectory(usableStock, dailyUsage, arrivals);
+          const onHandTraj = trajectory(usableStock, dailyUsage, []);
+          const safetyDay = firstDayBelow(traj.segments, safetyStock);
 
-          // Est coverage (with inbound)
-          // COMP-104 has PO-7712 (700 units) if in_transit
-          let inboundDays = 0;
-          if (ord.required_component === 'COMP-104') {
-            inboundDays = (700 / dailyUsage); // +7.8 days
-          }
-          const totalCoverageDays = (parseFloat(onHandDays) + (ord.required_component === 'COMP-104' ? 7.8 : 0)).toFixed(1);
+          const deadlineDt = new Date(ord.deadline + 'T00:00:00Z');
+          const daysToDeadline = daysBetween(now, deadlineDt);
 
-          // Exposure Gap
-          const gap = (parseFloat(totalCoverageDays) - parseFloat(onHandDays)).toFixed(1);
+          const status = classify(traj.depleted_at, safetyDay, daysToDeadline);
+          const isThin = status !== 'healthy';
 
-          // Status determination
-          let status = 'healthy';
-          let isThin = parseFloat(onHandDays) < parseFloat(diffDays);
-          if (parseFloat(totalCoverageDays) < parseFloat(diffDays)) {
-            status = 'critical';
-          } else if (isThin) {
-            status = 'at_risk';
-          }
+          const onHandDays = onHandTraj.depleted_at.toFixed(1);
+          const totalCoverageDays = traj.depleted_at.toFixed(1);
+          const diffDays = daysToDeadline.toFixed(1);
+
+          const gapNum = parseFloat(totalCoverageDays) - parseFloat(onHandDays);
+          const gap = gapNum.toFixed(1);
 
           const tr = document.createElement('tr');
           tr.innerHTML = `
@@ -614,7 +662,7 @@
             <td>${usableStock} units</td>
             <td><span class="bold">${onHandDays}d</span></td>
             <td><span class="bold">${totalCoverageDays}d</span></td>
-            <td>${parseFloat(gap) > 0 ? `<span class="gap-badge">+${gap}d exposure</span>` : `<span class="gap-badge zero">0d</span>`}</td>
+            <td>${gapNum > 0 ? `<span class="gap-badge">+${gap}d exposure</span>` : `<span class="gap-badge zero">0d</span>`}</td>
             <td>${ord.deadline} (${diffDays}d)</td>
             <td><span class="pill" style="background:#21262d;">${ord.priority}</span></td>
             <td>
@@ -726,19 +774,46 @@
 
       // Render Verdict Pill in Card Header
       const pillSlot = document.getElementById('verdict-pill-slot');
-      pillSlot.innerHTML = `<span class="pill pill-${run.decision}">${run.decision.toUpperCase()}</span>`;
+      let pillText = run.decision.toUpperCase();
+      let pillClass = `pill-${run.decision}`;
+      let boxClass = run.decision;
+      let titleText = `Verdict: ${run.decision.toUpperCase()}`;
+      let subText = '✅ Automatically executed to ERP (Idempotent Boundary)';
+
+      if (run.decision === 'escalate') {
+        if (run.approval_outcome === 'approved') {
+          pillText = 'APPROVED';
+          pillClass = 'pill-execute';
+          boxClass = 'execute';
+          titleText = 'Verdict: ESCALATE ➔ APPROVED';
+          subText = `✅ Approved by operator — Executed to ERP (${run.erp_writes ? run.erp_writes.length : 0} write(s))`;
+        } else if (run.approval_outcome === 'rejected') {
+          pillText = 'REJECTED';
+          pillClass = 'pill-critical';
+          boxClass = 'escalate';
+          titleText = 'Verdict: ESCALATE ➔ REJECTED';
+          subText = '❌ Rejected by operator — Refused ERP write';
+        } else {
+          pillText = 'ESCALATE';
+          pillClass = 'pill-escalate';
+          boxClass = 'escalate';
+          titleText = 'Verdict: ESCALATE';
+          subText = '⚠️ Human Approval Required — Approval limit exceeded or Quality Risk';
+        }
+      }
+
+      pillSlot.innerHTML = `<span class="pill ${pillClass}">${pillText}</span>`;
 
       // Render Verdict Container
       const vBox = document.getElementById('verdict-container');
-      const isExecute = run.decision === 'execute';
 
       let html = `
-        <div class="verdict-box ${run.decision}">
+        <div class="verdict-box ${boxClass}">
           <div class="verdict-top">
             <div>
-              <span style="font-size: 1.1rem; font-weight: 700; color: var(--heading);">Verdict: ${run.decision.toUpperCase()}</span>
+              <span style="font-size: 1.1rem; font-weight: 700; color: var(--heading);">${titleText}</span>
               <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 2px;">
-                ${isExecute ? '✅ Automatically executed to ERP (Idempotent Boundary)' : '⚠️ Human Approval Required — Approval limit exceeded or Quality Risk'}
+                ${subText}
               </div>
             </div>
             <div style="text-align: right;">
@@ -753,7 +828,7 @@
 
           ${brief.falsification_line ? `<div class="falsification-line">🔍 Falsification Line: "${brief.falsification_line}"</div>` : ''}
 
-          ${!isExecute && run.awaiting_approval ? `
+          ${run.awaiting_approval ? `
             <div style="margin-top: 16px; padding: 12px; background: rgba(248,81,73,0.1); border: 1px solid var(--danger); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
               <span class="bold" style="color: var(--danger);">Human Action Required to Commit ERP Write:</span>
               <div class="flex-gap">
