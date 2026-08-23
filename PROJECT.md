@@ -80,26 +80,27 @@ not concept. Full framing, exact wording, and the terms to use are in
 
 1. **(20s)** Coverage board. Every production order, two numbers each: what we
    hold, and what we hold *if suppliers keep their word*. The gap is the
-   exposure. Calm — **which requires the seed tuned so generated orders read
-   healthy at rest** (open item, person A). A board that's already red makes
-   Beat 2's drop meaningless.
+   exposure. Calm — all 7 production orders read healthy at rest (on-hand +
+   dependable inbound exceeds deadline).
 2. **(40s)** Fire the SUP-21 delay on PO-7712. PROD-882 collapses from 15.4 days
-   onto its on-hand floor of 4.3, against a 4.7-day deadline — the promised
+   onto its on-hand floor of 4.3 days, against a 4.7-day deadline — the promised
    inbound evaporates and only real stock is left. Say the framing line:
    **"TRACE catches the stall before the supplier admits it"** — true, that's
    the load-bearing PO poll (item 2b), not a claim.
 3. **(45s)** SUP-21 replies "dispatched." Tracking shows label created, no pickup.
-   Contradiction logged, reliability drops — say out loud that it dropped
+   Contradiction logged, reliability drops (0.75 → 0.45) — say out loud that it dropped
    because of the tracking record, not because the email sounded evasive.
    Over-rehearse this beat; it's visceral and most teams will trust supplier
    emails at face value.
-4. **(60s)** Solver output: split across SUP-42/SUP-37, consume stock for four
-   days, **delay PROD-914 by two days.** Show rejected options with quantified
-   regret. Cost trips the threshold → **the agent declines to execute** and
-   produces an escalation brief, not a raw alert. Make the refusal a beat, not a
-   footnote — every other team demos their agent *doing* things; almost nobody
-   makes a highlight of it correctly stopping. Brief ends with the
-   **`IF REJECTED:`** line — what it costs to not act.
+4. **(60s)** Solver output: split across SUP-42 (500 units, 4d lead time) and
+   SUP-37 (450 units, 6d lead time), consuming stock while waiting. High-priority
+   PROD-882 (4.7d deadline) gets SUP-42's 4-day arrival; PROD-914 (8.7d deadline)
+   gets SUP-37's 6-day arrival — both orders land on time without reschedule delays.
+   Show rejected options with quantified regret. Cost (₹123,674) executes within the
+   ₹150,000 threshold; clicking Judge Scenario 5 ("Exceeds Approval") lowers the
+   threshold to ₹50,000, causing **the agent to decline to execute** and produce
+   an escalation brief, not a raw alert. Make the refusal a beat, not a footnote.
+   Brief ends with the **`IF REJECTED:`** line — what it costs to not act.
 5. **(90s)** **Hand the judge the panel. "Pick any two disruptions — at the
    same time if you want."** Staleness detector re-enters, contingency
    trigger fires, and post-replan verification catches the agent's *own* plan

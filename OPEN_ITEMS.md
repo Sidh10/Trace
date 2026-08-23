@@ -13,17 +13,7 @@ Live tracker. Delete lines as they close. Not a design doc — see ARCHITECTURE.
   - Both `TRACE_LLM_ENABLED=true` and `TRACE_LLM_ENABLED=false` modes pass 100% of 373 tests.
   - **COORDINATION NOTE:** This session (Item 13 backend session) touched `app/api/routes.py` LAST to add `variant` parameter to `run_pipeline` and expose `POST /baseline/compare/{scenario_name}`. If another session edits `routes.py`, pull and merge carefully before committing.
 
-## Needs a call — Plan shape: reversibility moved per-action
-
-- [ ] ARCHITECTURE.md §7's `Plan` shape previously had ONE `reversibility`
-      field for the whole plan. Item 5 tags reversibility on EACH action
-      instead (`purchase_split` -> `compensable`, `production_reschedule`
-      -> `reversible`, `safety_stock_draw` -> `compensable` — resolved,
-      item 5b's own "?" is now filled in) — see `app/engine/planner.py`'s
-      module docstring for the reasoning on all three. ARCHITECTURE.md §7 is
-      updated to match. Item 6 (RATCHET) is the consuming component §7 says
-      should agree a shape change; confirm this works for it, or say what
-      needs to change.
+- [x] **Plan shape reversibility verified:** `app/engine/ratchet.py` and `app/api/routes.py` fully agree with the per-action reversibility model (`PurchaseSplitAction` -> `compensable`, `ProductionRescheduleAction` -> `reversible`, `SafetyStockDrawAction` -> `compensable`). `Plan` contains no top-level `reversibility` field and `ratchet.py` reads `chosen_plan.actions` directly.
 
 ## Owed by whoever touches item 5's allocation logic again — a real behavior change
 
