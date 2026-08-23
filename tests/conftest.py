@@ -105,6 +105,28 @@ def _llm_off_by_default(monkeypatch):
     monkeypatch.setattr(config, "TRACE_LLM_ENABLED", False)
 
 
+@pytest.fixture(autouse=True)
+def _reset_approval_threshold_after_each_test():
+    """`config.TRACE_APPROVAL_THRESHOLD` is the one other module-level config
+    value the app mutates directly at runtime, not just reads (grepped
+    `app/` for `config\\.[A-Z_]+\\s*=` — the only hits are
+    `app/environment/routes.py`'s `/environment/reset` and
+    `exceeds_approval`'s scenario handler). A plain `monkeypatch.setattr`
+    *before* a test doesn't protect against the test's OWN code — or the
+    real endpoint it calls — reassigning it mid-test, the way
+    `_llm_off_by_default` above protects `TRACE_LLM_ENABLED`.
+
+    Caught concretely: a test exercising `exceeds_approval` through the real
+    `TestClient`, without resetting the environment afterward, left this at
+    50,000 for the rest of the pytest session — cascading into 14 unrelated
+    failures across `test_solver.py` and `test_staleness.py` whose own
+    scenarios assumed the real default. Generalized here the same way the
+    LLM-flag leak was generalized, so the next test that forgets to reset
+    doesn't reintroduce it."""
+    yield
+    config.TRACE_APPROVAL_THRESHOLD = config.DEFAULT_APPROVAL_THRESHOLD
+
+
 # --------------------------------------------------------------------------
 # Shared helper for term-absence assertions
 # --------------------------------------------------------------------------
