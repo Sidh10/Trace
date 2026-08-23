@@ -880,20 +880,32 @@ def _baseline_unit_price(store: Store, component_id: str) -> Optional[float]:
 def _compute_cost_of_inaction(
     store: Store,
     component_id: str,
+    coverage_results: list[CoverageResult],
+    on_hand_operating: int,
     chosen: SourcingCombination,
-    allocations: list[AllocationDetail],
-    reschedules: list[ProductionRescheduleAction],
 ) -> CostOfInaction:
-    reschedule_delay_by_order = {a.production_order_id: a.delay_days for a in reschedules}
+    # Counterfactual inaction world: no new purchase orders placed (0 incoming supply)
+    inaction_combo = SourcingCombination(
+        members=[],
+        quantity_needed=chosen.quantity_needed,
+        quantity_allocated=0,
+        total_price=0.0,
+        lead_time_days=0,
+        reliability_score=1.0,
+        quality_score=1.0,
+        total_min_order_quantity=0,
+        total_available_quantity=0,
+    )
+    inaction_allocations = allocate_stock(coverage_results, on_hand_operating, inaction_combo)
 
     at_risk = [
         ProductionOrderAtRisk(
             production_order_id=detail.production_order_id,
             priority=detail.priority,
             units_unbuilt=max(0, detail.component_required - detail.allocated_on_hand),
-            deadline_missed_by_days=reschedule_delay_by_order.get(detail.production_order_id),
+            deadline_missed_by_days=None,
         )
-        for detail in allocations
+        for detail in inaction_allocations
         if not detail.on_time
     ]
 
@@ -928,7 +940,7 @@ def _compute_cost_of_inaction(
 
 
 def run_planner(
-    store: Optional[Store],
+    store: Store,
     component_id: str,
     solver_result: SolverResult,
     coverage_results: list[CoverageResult],
@@ -938,15 +950,9 @@ def run_planner(
 ) -> Optional[Plan]:
     """HARD FILTER and SOLVER (item 4) already ran; this is PLAN (item 5).
 
-    `coverage_results` should be every CoverageResult for production orders
-    that draw on `component_id` — the caller filters
-    `CoverageReport.results`, this module does not re-query the schedule
-    itself (reuse, not re-derivation).
-
-    Returns None when solver_result.pareto_set is empty — no feasible
-    sourcing combination exists, so there is no plan to build. That is
-    itself a real signal (logged in OPEN_ITEMS.md for item 6/8), not an
-    error this function should paper over.
+    Deterministic stock allocation, safety-stock draw gate, production
+    reschedule, and choice of the non-dominated combination that maximizes
+    reliability. Returns None when solver_result.pareto_set is empty.
     """
     store = STATE if store is None else store
     now = clock.now() if now is None else now
@@ -1043,7 +1049,7 @@ def run_planner(
     )
 
     cost_of_inaction = _compute_cost_of_inaction(
-        store, component_id, chosen, allocations, reschedules
+        store, component_id, coverage_results, on_hand_operating, chosen
     )
 
     return Plan(

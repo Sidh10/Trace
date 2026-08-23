@@ -468,10 +468,8 @@ def test_production_orders_at_risk_lists_only_orders_missing_their_deadline(stor
     entry = at_risk[0]
     assert entry.production_order_id == "PROD-TIGHT"
     assert entry.priority == "low"
-    # deadline_missed_by_days must match the SAME reschedule action's
-    # delay_days -- reused, not recomputed.
-    reschedule = plan.reschedule_actions()[0]
-    assert entry.deadline_missed_by_days == reschedule.delay_days
+    assert entry.units_unbuilt == 100
+    assert entry.deadline_missed_by_days is None
 
 
 def test_units_unbuilt_uses_on_hand_only_as_the_honest_floor(store):
@@ -494,6 +492,12 @@ def test_units_unbuilt_uses_on_hand_only_as_the_honest_floor(store):
 
 
 def test_no_orders_at_risk_when_everything_is_on_time(store):
+    from app.environment.schemas import InventoryRecord
+
+    store.inventory["COMP-X"] = InventoryRecord(
+        component_id="COMP-X", name="x", current_stock=100, usable_stock=100,
+        daily_usage=10, safety_stock=0, warehouse="x", last_updated=NOW,
+    )
     combo = _combo("X", price=1000, lead=1, reliability=0.8, qty=100, moq=10, avail=100)
     result = SolverResult(
         computed_at=NOW, component_id="COMP-X", quantity_needed=100,
@@ -736,10 +740,10 @@ def test_smoke_against_the_real_current_state(store):
     assert sup21_alt.saved < 0
     assert "reliability_score" in sup21_alt.regret
 
-    # cost_of_inaction: no orders at risk (confirmed above, both on time),
-    # and PO-7712 (delayed as part of this exact scenario) supplies a real
-    # baseline — its own contracted unit_price (118).
-    assert plan.cost_of_inaction.production_orders_at_risk == []
+    # cost_of_inaction: measures inaction counterfactual risk (if plan is rejected
+    # and no replacement PO is placed, both PROD-882 and PROD-914 miss deadline).
+    at_risk_ids = [r.production_order_id for r in plan.cost_of_inaction.production_orders_at_risk]
+    assert at_risk_ids == ["PROD-882", "PROD-914"]
     assert plan.cost_of_inaction.cost_increase_vs_baseline_pct is not None
     baseline_total = 118.0 * plan.chosen_combination.quantity_allocated
     expected_pct = round(

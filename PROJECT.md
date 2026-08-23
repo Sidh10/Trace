@@ -96,11 +96,10 @@ not concept. Full framing, exact wording, and the terms to use are in
    SUP-37 (450 units, 6d lead time), consuming stock while waiting. High-priority
    PROD-882 (4.7d deadline) gets SUP-42's 4-day arrival; PROD-914 (8.7d deadline)
    gets SUP-37's 6-day arrival — both orders land on time without reschedule delays.
-   Show rejected options with quantified regret. Cost (₹123,674) executes within the
-   ₹150,000 threshold; clicking Judge Scenario 5 ("Exceeds Approval") lowers the
-   threshold to ₹50,000, causing **the agent to decline to execute** and produce
-   an escalation brief, not a raw alert. Make the refusal a beat, not a footnote.
-   Brief ends with the **`IF REJECTED:`** line — what it costs to not act.
+   Show rejected options with quantified regret.
+   • Under default threshold (₹150,000): plan cost (₹123,674) is within budget → verdict = **`execute`**.
+   • Triggering Judge Scenario 5 ("Exceeds Approval"): threshold is lowered to ₹50,000 → verdict = **`escalate`** (`cost_above_threshold` trigger fired).
+   **The agent declines to execute autonomously**, produces an escalation brief, and awaits human operator approval via `POST /agent/approval/{plan_id}` before writing to ERP. Make the refusal a beat, not a footnote. Brief ends with the **`IF REJECTED:`** inaction counterfactual showing PROD-882 (460 units unbuilt) and PROD-914 (250 units unbuilt) at risk if nothing is done.
 5. **(90s)** **Hand the judge the panel. "Pick any two disruptions — at the
    same time if you want."** Staleness detector re-enters, contingency
    trigger fires, and post-replan verification catches the agent's *own* plan
