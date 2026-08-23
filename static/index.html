@@ -6,24 +6,32 @@
   <title>TRACE — Disruption Control Agent</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --card-bg: #161b22;
-      --card-border: #30363d;
-      --header-bg: #161b22;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
-      --heading: #f0f6fc;
+      --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+
+      --bg: #0d0f11;
+      --card-bg: #14171a;
+      --card-border: #262a30;
+      --header-bg: #111316;
+      
+      --text: #d8dde3;
+      --text-muted: #7d8590;
+      --heading: #f0f3f6;
+      
       --accent: #58a6ff;
       --accent-hover: #79c0ff;
+      
       --success: #2ea043;
-      --success-bg: rgba(46, 160, 67, 0.15);
+      --success-bg: rgba(46, 160, 67, 0.12);
+      
       --warning: #d29922;
-      --warning-bg: rgba(210, 153, 34, 0.15);
+      --warning-bg: rgba(210, 153, 34, 0.12);
+      
       --danger: #f85149;
-      --danger-bg: rgba(248, 81, 73, 0.15);
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      
       --purple: #a371f7;
-      --purple-bg: rgba(163, 113, 247, 0.15);
-      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --purple-bg: rgba(163, 113, 247, 0.12);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,76 +39,89 @@
     body {
       background-color: var(--bg);
       color: var(--text);
-      font-family: var(--font);
-      line-height: 1.5;
-      padding-bottom: 60px;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      line-height: 1.4;
+      padding-bottom: 40px;
+      -webkit-font-smoothing: antialiased;
     }
 
     /* Top Nav / Header */
     header {
       background-color: var(--header-bg);
       border-bottom: 1px solid var(--card-border);
-      padding: 16px 24px;
+      padding: 8px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 12px;
       position: sticky;
       top: 0;
       z-index: 100;
     }
 
     .brand-title {
-      font-size: 1.25rem;
+      font-size: 0.95rem;
       font-weight: 700;
       color: var(--heading);
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     .brand-title span.badge-team {
-      background: var(--purple-bg);
-      color: var(--purple);
-      border: 1px solid var(--purple);
-      font-size: 0.75rem;
-      padding: 2px 8px;
-      border-radius: 12px;
+      background: #1f2328;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 2px;
       font-weight: 600;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em;
     }
 
     .header-controls {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
     }
 
     .status-badge {
-      font-size: 0.8rem;
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-weight: 600;
-      background: #21262d;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      padding: 3px 8px;
+      border-radius: 2px;
+      font-weight: 500;
+      background: #14171a;
       border: 1px solid var(--card-border);
+      color: var(--text-muted);
     }
-    .status-badge.online { color: var(--success); border-color: var(--success); }
+    .status-badge.online {
+      color: var(--success);
+      border-color: rgba(46, 160, 67, 0.4);
+    }
 
     /* Layout grid */
     .container {
       max-width: 1400px;
-      margin: 24px auto;
-      padding: 0 16px;
+      margin: 12px auto;
+      padding: 0 12px;
       display: grid;
       grid-template-columns: 1fr;
-      gap: 24px;
+      gap: 12px;
     }
 
     @media (min-width: 1024px) {
       .container-two-col {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 24px;
+        gap: 12px;
       }
     }
 
@@ -108,27 +129,29 @@
     .card {
       background-color: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 20px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      border-radius: 2px;
+      padding: 12px 14px;
+      box-shadow: none;
     }
 
     .card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      margin-bottom: 10px;
       border-bottom: 1px solid var(--card-border);
-      padding-bottom: 12px;
+      padding-bottom: 8px;
     }
 
     .card-title {
-      font-size: 1.1rem;
-      font-weight: 600;
+      font-size: 0.78rem;
+      font-weight: 700;
       color: var(--heading);
       display: flex;
       align-items: center;
       gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }
 
     /* Buttons */
@@ -136,212 +159,311 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
-      padding: 8px 14px;
-      border-radius: 6px;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 2px;
       font-weight: 600;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
       cursor: pointer;
-      border: 1px solid transparent;
-      transition: all 0.15s ease;
-      background: #21262d;
-      color: var(--heading);
-      border-color: var(--card-border);
+      border: 1px solid var(--card-border);
+      background: #1f2328;
+      color: var(--text);
+      transition: none;
     }
 
     .btn:hover {
-      background: #30363d;
-      border-color: #8b949e;
+      background: #292e35;
+      border-color: #444c56;
+      color: var(--heading);
     }
 
     .btn-primary {
       background: var(--success);
       color: #ffffff;
+      border-color: var(--success);
     }
-    .btn-primary:hover { background: #2c974b; }
+    .btn-primary:hover {
+      background: #2c974b;
+      border-color: #2c974b;
+    }
 
     .btn-danger {
       background: var(--danger-bg);
       color: var(--danger);
-      border-color: var(--danger);
+      border-color: rgba(248, 81, 73, 0.4);
     }
-    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .btn-danger:hover {
+      background: var(--danger);
+      color: #ffffff;
+    }
 
     .btn-warning {
-      background: var(--warning-bg);
-      color: var(--warning);
-      border-color: var(--warning);
+      background: #1f2328;
+      color: var(--text);
+      border-color: var(--card-border);
+    }
+    .btn-warning:hover {
+      background: #292e35;
+      border-color: #444c56;
     }
 
     .btn-accent {
       background: #1f6feb;
       color: #ffffff;
+      border-color: #1f6feb;
     }
-    .btn-accent:hover { background: #388bfd; }
+    .btn-accent:hover {
+      background: #388bfd;
+    }
 
     .btn-scenario {
-      background: #161b22;
-      border: 1px solid #30363d;
+      background: #111316;
+      border: 1px solid var(--card-border);
       text-align: left;
-      padding: 10px 12px;
+      padding: 7px 9px;
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 4px;
+      gap: 2px;
       width: 100%;
+      border-radius: 2px;
+      text-transform: none;
     }
     .btn-scenario:hover {
-      border-color: var(--accent);
-      background: #21262d;
+      border-color: #444c56;
+      background: #171a1e;
     }
-    .btn-scenario .title { font-weight: 600; color: var(--heading); font-size: 0.85rem; }
-    .btn-scenario .sub { font-size: 0.75rem; color: var(--text-muted); }
+    .btn-scenario .title {
+      font-weight: 600;
+      color: var(--heading);
+      font-size: 0.76rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .btn-scenario .sub {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      line-height: 1.3;
+    }
 
     .scenario-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 6px;
     }
 
     /* Tables */
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.85rem;
+      font-size: 0.78rem;
     }
 
     th, td {
-      padding: 10px 12px;
+      padding: 6px 8px;
       text-align: left;
-      border-bottom: 1px solid var(--card-border);
+      border-bottom: 1px solid #1c2025;
     }
 
     th {
-      background-color: #0d1117;
+      background-color: #111316;
       color: var(--text-muted);
       font-weight: 600;
       text-transform: uppercase;
-      font-size: 0.75rem;
-      letter-spacing: 0.5px;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid var(--card-border);
     }
 
     tr:hover td { background-color: rgba(255,255,255,0.02); }
 
+    /* Numeric column alignment & tabular nums */
+    #coverage-table th:nth-child(4),
+    #coverage-table th:nth-child(5),
+    #coverage-table th:nth-child(6),
+    #coverage-table th:nth-child(7),
+    #coverage-table td:nth-child(4),
+    #coverage-table td:nth-child(5),
+    #coverage-table td:nth-child(6),
+    #coverage-table td:nth-child(7) {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    #coverage-table td:nth-child(1),
+    #coverage-table td:nth-child(8) {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    #regret-box table th:nth-child(2),
+    #regret-box table td:nth-child(2) {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
     /* Status Pill Badges */
     .pill {
       display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 0.75rem;
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-size: 0.68rem;
       font-weight: 600;
       text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border: 1px solid transparent;
     }
-    .pill-healthy { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
-    .pill-at_risk { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning); }
-    .pill-critical { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
-    .pill-thin { background: rgba(88, 166, 255, 0.15); color: var(--accent); border: 1px solid var(--accent); }
+    .pill-healthy { background: var(--success-bg); color: var(--success); border-color: rgba(46, 160, 67, 0.4); }
+    .pill-at_risk { background: var(--warning-bg); color: var(--warning); border-color: rgba(210, 153, 34, 0.4); }
+    .pill-critical { background: var(--danger-bg); color: var(--danger); border-color: rgba(248, 81, 73, 0.4); }
+    .pill-thin { background: rgba(125, 133, 144, 0.15); color: var(--text-muted); border-color: var(--card-border); font-family: var(--font-mono); }
 
-    .pill-execute { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); font-size: 0.9rem; padding: 4px 12px; }
-    .pill-escalate { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); font-size: 0.9rem; padding: 4px 12px; }
+    .pill-execute { background: var(--success-bg); color: var(--success); border-color: rgba(46, 160, 67, 0.4); font-size: 0.75rem; padding: 2px 8px; }
+    .pill-escalate { background: var(--danger-bg); color: var(--danger); border-color: rgba(248, 81, 73, 0.4); font-size: 0.75rem; padding: 2px 8px; }
 
     /* Gap highlight */
     .gap-badge {
-      font-weight: 700;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
       color: var(--warning);
-      background: rgba(210, 153, 34, 0.1);
-      padding: 2px 6px;
-      border-radius: 4px;
+      background: var(--warning-bg);
+      border: 1px solid rgba(210, 153, 34, 0.3);
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-size: 0.72rem;
     }
-    .gap-badge.zero { color: var(--text-muted); background: transparent; font-weight: normal; }
+    .gap-badge.zero {
+      color: var(--text-muted);
+      background: transparent;
+      border: 1px solid transparent;
+      font-weight: normal;
+    }
 
     /* Verdict Banner */
     .verdict-box {
       border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-      background: #0d1117;
+      border-radius: 2px;
+      padding: 12px;
+      margin-bottom: 14px;
+      background: #101215;
     }
-    .verdict-box.execute { border-color: var(--success); }
-    .verdict-box.escalate { border-color: var(--danger); }
+    .verdict-box.execute { border-color: rgba(46, 160, 67, 0.5); }
+    .verdict-box.escalate { border-color: rgba(248, 81, 73, 0.5); }
 
     .verdict-top {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
+    }
+    .verdict-top div:last-child {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
     }
 
     .verdict-details {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 12px;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px dashed var(--card-border);
-      font-size: 0.85rem;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--card-border);
+      font-size: 0.76rem;
+    }
+    .verdict-details span.bold {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
     }
 
     .falsification-line {
-      margin-top: 10px;
-      font-style: italic;
-      color: var(--warning);
-      font-size: 0.85rem;
-      background: rgba(210, 153, 34, 0.08);
-      padding: 8px 12px;
-      border-left: 3px solid var(--warning);
-      border-radius: 4px;
+      margin-top: 8px;
+      font-style: normal;
+      color: var(--text);
+      font-size: 0.78rem;
+      background: #14171a;
+      padding: 6px 10px;
+      border-left: 2px solid #57606a;
+      border-radius: 2px;
     }
 
     /* Active Log */
     .log-box {
-      background: #0d1117;
+      background: #101215;
       border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 12px;
-      max-height: 180px;
+      border-radius: 2px;
+      padding: 8px 10px;
+      max-height: 140px;
       overflow-y: auto;
-      font-family: monospace;
-      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.74rem;
       color: var(--text);
     }
-    .log-entry { margin-bottom: 6px; border-bottom: 1px solid #21262d; padding-bottom: 4px; }
+    .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1a1e22; padding-bottom: 3px; }
     .log-entry .time { color: var(--text-muted); }
-    .log-entry .tag { color: var(--accent); font-weight: bold; }
+    .log-entry .tag { color: var(--text); font-weight: 600; }
 
     /* Provenance Graph Trail */
     .prov-chain {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      margin-top: 12px;
+      gap: 6px;
+      margin-top: 8px;
     }
     .prov-node {
-      background: #0d1117;
+      background: #101215;
       border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 0.8rem;
+      border-radius: 2px;
+      padding: 8px 10px;
+      font-size: 0.75rem;
     }
     .prov-node-header {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
       font-weight: 600;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
     }
     .rel-tag {
-      font-size: 0.7rem;
-      padding: 1px 6px;
-      border-radius: 4px;
-      font-weight: bold;
+      font-size: 0.65rem;
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-weight: 600;
       text-transform: uppercase;
+      font-family: var(--font-mono);
+      border: 1px solid transparent;
     }
-    .rel-Support { background: var(--success-bg); color: var(--success); }
-    .rel-Contradict { background: var(--danger-bg); color: var(--danger); }
-    .rel-Invalidate { background: var(--danger-bg); color: var(--danger); }
-    .rel-Trigger { background: var(--warning-bg); color: var(--warning); }
-    .rel-Depend-on { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
-    .rel-Update { background: var(--purple-bg); color: var(--purple); }
+    .rel-Support { background: var(--success-bg); color: var(--success); border-color: rgba(46,160,67,0.3); }
+    .rel-Contradict { background: var(--danger-bg); color: var(--danger); border-color: rgba(248,81,73,0.3); }
+    .rel-Invalidate { background: var(--danger-bg); color: var(--danger); border-color: rgba(248,81,73,0.3); }
+    .rel-Trigger { background: var(--warning-bg); color: var(--warning); border-color: rgba(210,153,34,0.3); }
+    .rel-Depend-on { background: rgba(125, 133, 144, 0.15); color: var(--text); border-color: var(--card-border); }
+    .rel-Update { background: var(--purple-bg); color: var(--purple); border-color: rgba(163,113,247,0.3); }
+
+    #tool-audit-box {
+      background: #101215;
+      padding: 10px;
+      border-radius: 2px;
+      border: 1px solid var(--card-border);
+      font-size: 0.76rem;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 12px;
+    }
+
+    h4 {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
 
     /* Utility */
     .flex-gap { display: flex; gap: 8px; align-items: center; }
@@ -354,14 +476,14 @@
   <!-- Header / Controls -->
   <header>
     <div class="brand-title">
-      <span>⚙️ TRACE</span>
+      <span>TRACE</span>
       <span class="badge-team">PUNE 2026</span>
-      <span style="font-size: 0.85rem; font-weight: normal; color: var(--text-muted);">Supply Chain Disruption Control Agent</span>
+      <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted); text-transform: none; letter-spacing: normal;">Supply Chain Disruption Control Agent</span>
     </div>
     <div class="header-controls">
-      <div class="status-badge online" id="health-badge">● LLM Mode: --</div>
-      <div class="status-badge" id="clock-badge">🕒 Sim Clock: --</div>
-      <button class="btn btn-warning" onclick="resetSimulator()">🔄 Reset Environment</button>
+      <div class="status-badge online" id="health-badge">LLM MODE: --</div>
+      <div class="status-badge" id="clock-badge">SIM CLOCK: --</div>
+      <button class="btn btn-warning" onclick="resetSimulator()">RESET ENVIRONMENT</button>
     </div>
   </header>
 
@@ -371,10 +493,10 @@
     <div class="card">
       <div class="card-header">
         <div class="card-title">
-          <span>📊 COVERAGE BOARD</span>
-          <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">(Item 12 — Live Inventory & PO Dependability per Production Order)</span>
+          <span>COVERAGE BOARD</span>
+          <span style="font-size: 0.72rem; font-weight: normal; color: var(--text-muted); letter-spacing: normal; text-transform: none;">(Item 12 — Live Inventory & PO Dependability per Production Order)</span>
         </div>
-        <button class="btn" onclick="fetchCoverageBoard()">🔄 Refresh Board</button>
+        <button class="btn" onclick="fetchCoverageBoard()">REFRESH BOARD</button>
       </div>
 
       <div style="overflow-x: auto;">
@@ -407,74 +529,74 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <span>🎯 JUDGE DISRUPTION PANEL</span>
+            <span>JUDGE DISRUPTION PANEL</span>
           </div>
-          <span style="font-size: 0.75rem; color: var(--text-muted);">Supports sequential dual-injection</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.04em;">SUPPORTS DUAL INJECTION</span>
         </div>
 
         <div class="scenario-grid">
           <button class="btn btn-scenario" onclick="injectScenario('supplier_delay')">
-            <span class="title">🚨 1. Supplier Delay</span>
+            <span class="title">1. Supplier Delay</span>
             <span class="sub">PO-7712 delay + claim contradiction</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('quality_fail')">
-            <span class="title">⚠️ 2. Quality Fail</span>
+            <span class="title">2. Quality Fail</span>
             <span class="sub">SUP-18 fails quality threshold (0.71 < 0.85)</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('insufficient_qty')">
-            <span class="title">📦 3. Insufficient Qty</span>
+            <span class="title">3. Insufficient Qty</span>
             <span class="sub">SUP-42 stock capped (600/950) -> Order Split</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('low_reliability_fastest')">
-            <span class="title">⚡ 4. Low Reliability Fastest</span>
+            <span class="title">4. Low Reliability Fastest</span>
             <span class="sub">SUP-21 fast but unreliable (0.45)</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('exceeds_approval')">
-            <span class="title">🔒 5. Exceeds Approval</span>
+            <span class="title">5. Exceeds Approval</span>
             <span class="sub">Threshold lowered to ₹50k -> Escalation</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('stale_erp')">
-            <span class="title">📊 6. Stale ERP Stock</span>
+            <span class="title">6. Stale ERP Stock</span>
             <span class="sub">Scenario 2 overstatement (450 vs 390)</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('demand_spike')">
-            <span class="title">📈 7. Demand Spike</span>
+            <span class="title">7. Demand Spike</span>
             <span class="sub">PROD-882 demand doubled to 1400</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('expedite_unavailable')">
-            <span class="title">🛑 8. Expedite Unavailable</span>
+            <span class="title">8. Expedite Unavailable</span>
             <span class="sub">SUP-42 delayed +4d -> Contingency Fallback</span>
           </button>
 
           <button class="btn btn-scenario" onclick="injectScenario('priority_change')">
-            <span class="title">🔄 9. Priority Change</span>
+            <span class="title">9. Priority Change</span>
             <span class="sub">PROD-914 elevated to High priority</span>
           </button>
         </div>
 
-        <div style="margin-top: 16px;">
-          <div style="font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; color: var(--heading);">Active Injected Disruption Stream:</div>
+        <div style="margin-top: 12px;">
+          <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; color: var(--text-muted);">Active Disruption Stream:</div>
           <div class="log-box" id="scenario-log">
             <div class="muted">No disruptions injected yet. Click a scenario button above to inject.</div>
           </div>
         </div>
 
-        <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center; background: #0d1117; padding: 12px; border-radius: 6px; border: 1px solid var(--card-border);">
-          <div style="font-size: 0.85rem; font-weight: 600;">Target Component:</div>
-          <select id="component-select" style="background: #21262d; color: var(--text); border: 1px solid var(--card-border); padding: 6px 12px; border-radius: 4px; font-weight: bold;">
+        <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center; background: #101215; padding: 8px 10px; border-radius: 2px; border: 1px solid var(--card-border);">
+          <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);">TARGET:</div>
+          <select id="component-select" style="background: #1a1e22; color: var(--text); border: 1px solid var(--card-border); padding: 4px 8px; border-radius: 2px; font-weight: 600; font-size: 0.76rem; font-family: var(--font-mono);">
             <option value="COMP-104">COMP-104 (Motor Driver IC)</option>
             <option value="COMP-122">COMP-122 (Servo Motor Actuator)</option>
             <option value="COMP-108">COMP-108 (CAN Bus Transceiver)</option>
             <option value="COMP-105">COMP-105 (8-Channel Relay Board)</option>
           </select>
-          <button class="btn btn-primary" style="margin-left: auto;" onclick="runAgent()">▶ Run Agent Pipeline</button>
+          <button class="btn btn-primary" style="margin-left: auto;" onclick="runAgent()">RUN PIPELINE</button>
         </div>
       </div>
 
@@ -482,14 +604,14 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <span>🤖 AGENT DECISION BRIEF</span>
+            <span>AGENT DECISION BRIEF</span>
           </div>
           <div id="verdict-pill-slot"></div>
         </div>
 
         <div id="verdict-container">
-          <div class="muted" style="text-align: center; padding: 40px;">
-            Ready for execution. Click <strong>"▶ Run Agent Pipeline"</strong> or inject a scenario to trigger the TRACE control loop.
+          <div class="muted" style="text-align: center; padding: 30px; font-size: 0.8rem;">
+            Ready for execution. Select a disruption scenario or click <strong>RUN PIPELINE</strong>.
           </div>
         </div>
       </div>
@@ -500,7 +622,7 @@
     <div class="card" id="audit-details-card" style="display: none;">
       <div class="card-header">
         <div class="card-title">
-          <span>📜 AUDIT TRAIL, PROVENANCE TRACE & TOOL DISCIPLINE</span>
+          <span>AUDIT TRAIL, PROVENANCE TRACE & TOOL DISCIPLINE</span>
         </div>
       </div>
 
@@ -508,17 +630,17 @@
 
         <!-- Left: Tool Audit & Regret Ledger -->
         <div>
-          <h4 style="color: var(--heading); margin-bottom: 10px;">Tool Discipline & Gating Summary</h4>
-          <div id="tool-audit-box" style="background: #0d1117; padding: 12px; border-radius: 6px; border: 1px solid var(--card-border); font-size: 0.85rem; margin-bottom: 16px;"></div>
+          <h4>TOOL DISCIPLINE & GATING SUMMARY</h4>
+          <div id="tool-audit-box"></div>
 
-          <h4 style="color: var(--heading); margin-bottom: 10px;">Rejected Alternatives (Regret Ledger)</h4>
-          <div id="regret-box" style="overflow-x: auto; margin-bottom: 16px;"></div>
+          <h4>REJECTED ALTERNATIVES (REGRET LEDGER)</h4>
+          <div id="regret-box" style="overflow-x: auto; margin-bottom: 12px;"></div>
         </div>
 
         <!-- Right: Provenance Graph Trail -->
         <div>
-          <h4 style="color: var(--heading); margin-bottom: 10px;">Provenance Graph Chain (Item 7)</h4>
-          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">Causal graph trace: Disruption Event ➔ Coverage / Verify ➔ Pareto Solver ➔ Plan ➔ Ratchet Brief</div>
+          <h4>PROVENANCE GRAPH CHAIN</h4>
+          <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 6px;">Causal trace: Disruption Event ➔ Coverage/Verify ➔ Pareto Solver ➔ Recovery Plan ➔ Ratchet Brief</div>
           <div class="prov-chain" id="prov-chain-box"></div>
         </div>
 
