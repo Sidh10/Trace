@@ -108,13 +108,34 @@ def run_demo_rehearsal():
     # ----------------------------------------------------------------------
     # BEAT 6: Staleness Detection & Bounded Loop Re-entry
     # ----------------------------------------------------------------------
-    print("\n--- BEAT 6: STALENESS DETECTION & BOUNDED RE-ENTRY ---")
+    print("\n--- BEAT 6A: STALENESS DETECTION & BOUNDED RE-ENTRY ---")
     store6 = build_store()
     inject_scenario("stale_erp")
+    print("Explanation: `PLAN-0002` was the initial plan executed on pass 1 for store6. Upon detecting inventory staleness, the orchestrator re-entered planning and generated `PLAN-0003` to supersede it.")
     run_stale = run_pipeline(store6, component_id="COMP-104", now=now)
     print(f"Post-Replan Verified: {run_stale.post_replan_verified}")
     print(f"Reentered at Stage: {run_stale.reentered_at_stage}")
     print(f"Stages Executed Trail: {run_stale.stages}")
+
+    # ----------------------------------------------------------------------
+    # BEAT 6B: Closing Audit Trail, Tool-Call Summary & Multi-Baseline Proof
+    # ----------------------------------------------------------------------
+    print("\n--- BEAT 6B: CLOSING PROOFS & AUDIT SUMMARY ---")
+    print("1. PROVENANCE GRAPH FOR PO-7712 RUN:")
+    print(f"   Total Edges: {len(run_default.graph.edges)} (Saved to artifacts/audit_trail_po_7712.json)")
+    for edge in run_default.graph.edges[:5]:
+        print(f"   * [{edge.relation}] {edge.from_node} -> {edge.to_node} ({edge.produced_by_module})")
+
+    print("\n2. TOOL-CALL AUDIT (MADE VS AVOIDED):")
+    ta = run_default.graph.tool_audit
+    print(f"   Calls Made: {ta.total_calls_made}, Calls Avoided: {ta.total_calls_avoided}")
+    print(f"   Verdict: {ta.necessity_verdict}")
+
+    print("\n3. MULTI-BASELINE HARNESS COMPARISON (ITEM 13):")
+    from app.engine.baseline import run_baseline_comparison
+    base = run_baseline_comparison("supplier_delay", now=now)
+    for v_name, summary in base.variants.items():
+        print(f"   * Variant: {v_name:<25} | Spend: RS {summary.total_spend:,.2f} | Decision: {summary.decision} | Silent Failure: {summary.silent_failure}")
 
     print("\n==========================================================================")
     print("             DEMO SCRIPT REHEARSAL COMPLETED SUCCESSFULLY                 ")
