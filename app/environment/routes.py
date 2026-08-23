@@ -225,6 +225,35 @@ def reset_environment() -> dict:
     return {"status": "reset", "message": "Environment reset to clean initial state."}
 
 
+def _mark_po_delayed_and_sync_threshold(store: "seed_data.Store", po_id: str) -> None:
+    """Set a PO's status to `delayed`, and — the reason this exists rather
+    than a bare assignment — sync its own `approval_required_above` DOWN if
+    a lower global override is ALREADY active.
+
+    Why: once a PO is delayed, `planner.find_disrupted_po` names it "the
+    disrupted PO" for its component, and RATCHET/SOLVER start reading ITS
+    OWN threshold (`Store.resolve_approval_threshold`) instead of the global
+    `config.TRACE_APPROVAL_THRESHOLD` (this session's real per-PO §5.2
+    threading). `exceeds_approval`'s own handler already syncs every
+    CURRENTLY-delayed PO down when IT runs — that alone only covers
+    override-then-disrupt... no, disrupt-then-override. It does NOT cover
+    the reverse order (`exceeds_approval` first, a delay-marking scenario
+    second): a PO delayed AFTER the override was already active would still
+    carry its old, unchanged, higher field, silently un-overriding an
+    already-active global policy change. Confirmed live in the browser —
+    `exceeds_approval -> stale_erp` reverted from ESCALATE/50000 back to
+    EXECUTE/150000. Calling this at the delay-marking site closes that
+    direction; the two together make the sync order-independent."""
+    po = store.purchase_orders.get(po_id)
+    if po is None:
+        return
+    po.status = "delayed"
+    from app import config
+
+    if config.TRACE_APPROVAL_THRESHOLD < po.approval_required_above:
+        po.approval_required_above = config.TRACE_APPROVAL_THRESHOLD
+
+
 @router.post("/environment/inject/{scenario_name}")
 def inject_scenario(scenario_name: str) -> dict:
     """Inject a hidden-test disruption scenario into the simulated environment.
@@ -240,8 +269,7 @@ def inject_scenario(scenario_name: str) -> dict:
             subject="Status check on PO-7712",
             body="Any update on PO-7712?",
         )
-        if "PO-7712" in store.purchase_orders:
-            store.purchase_orders["PO-7712"].status = "delayed"
+        _mark_po_delayed_and_sync_threshold(store, "PO-7712")
         return {
             "scenario": "supplier_delay",
             "target_component": "COMP-104",
@@ -281,17 +309,14 @@ def inject_scenario(scenario_name: str) -> dict:
     elif scenario_name == "exceeds_approval":
         from app import config
         config.TRACE_APPROVAL_THRESHOLD = 50000.0
-        # Also lower any already-delayed COMP-104 PO's own approval_required_
-        # above. Once a PO is genuinely the "disrupted PO" for its component
-        # (planner.find_disrupted_po, e.g. after supplier_delay marked one
-        # delayed), RATCHET/SOLVER now read THAT PO's own threshold instead
-        # of the global constant (Store.resolve_approval_threshold — the
-        # real per-PO §5.2 field, threaded through this session). Without
-        # this, sequential-injection (supplier_delay then exceeds_approval —
-        # the judge panel's own advertised "dual-injection" pattern) would
-        # silently leave the global lower-threshold override unreachable:
-        # the unchanged PO field would keep governing, and "forced to
-        # escalate" would quietly not hold.
+        # Sync every ALREADY-delayed COMP-104 PO's own approval_required_
+        # above down to match. This handles disrupt-then-override (e.g.
+        # supplier_delay already ran); _mark_po_delayed_and_sync_threshold
+        # (above) handles the reverse, override-then-disrupt, at the point a
+        # PO transitions to delayed instead — together, order-independent.
+        # See that function's docstring for why this is needed at all: once
+        # a PO is delayed, RATCHET/SOLVER read ITS OWN threshold, not this
+        # global constant.
         for po in store.purchase_orders.values():
             if po.component_id == "COMP-104" and po.status == "delayed":
                 po.approval_required_above = 50000.0
@@ -305,8 +330,7 @@ def inject_scenario(scenario_name: str) -> dict:
         if "COMP-104" in store.inventory:
             store.inventory["COMP-104"].current_stock = 450
             store.inventory["COMP-104"].usable_stock = 390
-        if "PO-7712" in store.purchase_orders:
-            store.purchase_orders["PO-7712"].status = "delayed"
+        _mark_po_delayed_and_sync_threshold(store, "PO-7712")
         return {
             "scenario": "stale_erp",
             "target_component": "COMP-104",

@@ -559,6 +559,34 @@ def test_sequential_injection_supplier_delay_then_exceeds_approval_still_escalat
         client.post("/environment/reset")
 
 
+def test_sequential_injection_exceeds_approval_then_supplier_delay_still_escalates(client):
+    """The REVERSE order of the test above — exceeds_approval FIRST, then a
+    scenario that marks a PO delayed. This is a real, separate gap the first
+    fix (syncing already-delayed POs when exceeds_approval runs) did not
+    cover: at the moment exceeds_approval ran here, no PO was delayed yet,
+    so its sync loop had nothing to touch. Then supplier_delay marks PO-7712
+    delayed carrying its OLD, unchanged 150,000 field, which would silently
+    un-override the already-active 50,000 global policy the moment
+    `find_disrupted_po` starts naming it. Caught live in the browser testing
+    stale_erp instead of supplier_delay; this test exercises the same gap
+    with the simpler of the two disrupting scenarios. Fixed by
+    `_mark_po_delayed_and_sync_threshold` syncing at the delay-marking site
+    too, not just at the override site — order-independent either way."""
+    try:
+        client.post("/environment/reset")
+        client.post("/environment/inject/exceeds_approval")
+        run1 = client.post("/agent/handle-event", json={"component_id": "COMP-104"}).json()
+        assert run1["decision"] == "escalate"  # sanity: no delayed PO yet, global governs directly
+
+        client.post("/environment/inject/supplier_delay")
+        run2 = client.post("/agent/handle-event", json={"component_id": "COMP-104"}).json()
+        assert run2["decision"] == "escalate"
+        assert run2["brief"]["approval_threshold"] == 50_000.0
+        assert "cost_above_threshold" in run2["brief"]["triggers_fired"]
+    finally:
+        client.post("/environment/reset")
+
+
 
 
 # ==========================================================================
