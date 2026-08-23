@@ -787,7 +787,7 @@
       `;
 
       if (graph && graph.edges) {
-        const planEdges = graph.edges.filter(e => e.from_node.startsWith('plan:'));
+        const planEdges = graph.edges.filter(e => e.from && e.from.startsWith('plan:'));
         if (planEdges.length > 0) {
           planEdges.forEach(e => {
             let revTag = 'compensable';
@@ -796,7 +796,7 @@
 
             html += `
               <tr>
-                <td class="bold">${e.relation} ➔ ${e.to_node}</td>
+                <td class="bold">${e.relation} ➔ ${e.to}</td>
                 <td>${e.note}</td>
                 <td><span class="pill pill-${revTag === 'irreversible' ? 'critical' : revTag === 'reversible' ? 'healthy' : 'at_risk'}">${revTag}</span></td>
               </tr>
@@ -863,7 +863,7 @@
           nodeDiv.className = 'prov-node';
           nodeDiv.innerHTML = `
             <div class="prov-node-header">
-              <span>${edge.from_node} ➔ ${edge.to_node}</span>
+              <span>${edge.from} ➔ ${edge.to}</span>
               <span class="rel-tag rel-${edge.relation}">${edge.relation}</span>
             </div>
             <div class="muted">${edge.note}</div>
