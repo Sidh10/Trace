@@ -587,6 +587,57 @@ def test_sequential_injection_exceeds_approval_then_supplier_delay_still_escalat
         client.post("/environment/reset")
 
 
+def test_supplier_delay_injection_actually_triggers_verification(client, store):
+    """Regression: `inject_scenario("supplier_delay")` used to mark PO-7712
+    `delayed` BEFORE the pipeline ever ran. `coverage.polling_targets()` —
+    MONITOR's and VERIFY's shared, load-bearing gate — only includes
+    `dependable_inbound` POs (`pending`/`in_transit`), so a PO already
+    marked `delayed` before the pipeline sees it is silently excluded: the
+    contradiction (SUP-21 claims 'dispatched', tracking shows
+    'label_created_no_pickup') was never actually caught, and SUP-21's
+    reliability never moved off its seeded 0.75. Confirmed live in the
+    browser before this fix — decision brief still came out correct (SUP-37
+    beats SUP-21 on reliability regardless of whether it's 0.75 or 0.45),
+    which is exactly why this needs an assertion on reliability and the
+    provenance graph, not just on the pipeline completing.
+
+    Fixed by having the injection endpoint run one real, cached pipeline
+    pass BEFORE marking the PO delayed (so MONITOR/VERIFY catch the
+    contradiction for real, in a run whose provenance graph keeps it), then
+    marking it delayed — the next `/agent/handle-event` call (which the
+    judge panel's own `injectScenario()` always makes immediately after)
+    finds a genuine `po_status_changed` staleness finding and re-enters,
+    reusing that VERIFY output rather than re-running it, so the
+    contradiction survives into the final decision brief's own graph."""
+    # No `client.post("/environment/reset")` here — the `store` fixture
+    # already gives a fresh environment, and calling it again would
+    # reassign `seed_data.STATE` to a NEW Store object out from under this
+    # test's own `store` reference, silently reading a stale, unrelated one
+    # for every assertion below.
+    assert store.suppliers["SUP-21"].reliability_score == 0.75  # sanity: seeded starting value
+
+    client.post("/environment/inject/supplier_delay")
+    run = client.post("/agent/handle-event", json={"component_id": "COMP-104"}).json()
+
+    assert store.suppliers["SUP-21"].reliability_score == 0.45
+    assert store.purchase_orders["PO-7712"].status == "delayed"
+
+    contradict_edges = [
+        e for e in run["graph"]["edges"]
+        if e["produced_by_module"] == "verify" and e["relation"] == "Contradict"
+    ]
+    assert len(contradict_edges) == 1
+    assert contradict_edges[0]["from"] == "tracking:PO-7712"
+    assert "label_created_no_pickup" in contradict_edges[0]["note"]
+
+    invalidate_edges = [
+        e for e in run["graph"]["edges"]
+        if e["produced_by_module"] == "verify" and e["relation"] == "Invalidate"
+    ]
+    assert len(invalidate_edges) == 1
+    assert "0.75" in invalidate_edges[0]["note"]
+    assert "0.45" in invalidate_edges[0]["note"]
+
 
 
 # ==========================================================================
