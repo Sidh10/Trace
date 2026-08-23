@@ -281,6 +281,20 @@ def inject_scenario(scenario_name: str) -> dict:
     elif scenario_name == "exceeds_approval":
         from app import config
         config.TRACE_APPROVAL_THRESHOLD = 50000.0
+        # Also lower any already-delayed COMP-104 PO's own approval_required_
+        # above. Once a PO is genuinely the "disrupted PO" for its component
+        # (planner.find_disrupted_po, e.g. after supplier_delay marked one
+        # delayed), RATCHET/SOLVER now read THAT PO's own threshold instead
+        # of the global constant (Store.resolve_approval_threshold — the
+        # real per-PO §5.2 field, threaded through this session). Without
+        # this, sequential-injection (supplier_delay then exceeds_approval —
+        # the judge panel's own advertised "dual-injection" pattern) would
+        # silently leave the global lower-threshold override unreachable:
+        # the unchanged PO field would keep governing, and "forced to
+        # escalate" would quietly not hold.
+        for po in store.purchase_orders.values():
+            if po.component_id == "COMP-104" and po.status == "delayed":
+                po.approval_required_above = 50000.0
         return {
             "scenario": "exceeds_approval",
             "target_component": "COMP-104",

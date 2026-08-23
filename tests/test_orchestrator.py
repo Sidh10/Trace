@@ -522,6 +522,43 @@ def test_environment_scenario_injection_endpoints(client):
         client.post("/environment/reset")
 
 
+def test_sequential_injection_supplier_delay_then_exceeds_approval_still_escalates(client):
+    """The judge panel's own advertised capability ("Supports sequential
+    dual-injection") — supplier_delay THEN exceeds_approval, WITHOUT a reset
+    in between, on the same real environment `POST /environment/inject`
+    always uses (`seed_data.STATE`).
+
+    Regression: once RATCHET/SOLVER genuinely read a disrupted PO's own
+    `approval_required_above` (this session's per-PO threading fix),
+    PO-7712 becomes "the disrupted PO" the moment supplier_delay marks it
+    `delayed` — and its own seeded field (150,000, identical to the OLD
+    global default) would silently keep governing, making
+    `exceeds_approval`'s global override (50,000) unreachable. Caught by
+    hand via the actual browser judge panel, not by the pre-existing
+    `test_environment_scenario_injection_endpoints` above, which resets
+    between every injection and so never exercises this combination."""
+    # `exceeds_approval` mutates `config.TRACE_APPROVAL_THRESHOLD` directly
+    # (a process-wide global, not something the `store` fixture resets) —
+    # unlike `test_environment_scenario_injection_endpoints` above, this
+    # test can't reset between every step (the whole point is NOT
+    # resetting), so it must reset once at the end, or it leaks a 50,000
+    # threshold into every test that runs after it for the rest of the
+    # pytest session.
+    try:
+        client.post("/environment/reset")
+        client.post("/environment/inject/supplier_delay")
+        run1 = client.post("/agent/handle-event", json={"component_id": "COMP-104"}).json()
+        assert run1["decision"] == "execute"  # sanity: the default-threshold plan executes cleanly
+
+        client.post("/environment/inject/exceeds_approval")
+        run2 = client.post("/agent/handle-event", json={"component_id": "COMP-104"}).json()
+        assert run2["decision"] == "escalate"
+        assert run2["brief"]["approval_threshold"] == 50_000.0
+        assert "cost_above_threshold" in run2["brief"]["triggers_fired"]
+    finally:
+        client.post("/environment/reset")
+
+
 
 
 # ==========================================================================
