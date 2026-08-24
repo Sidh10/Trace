@@ -2,7 +2,7 @@
 
 TRACE is an autonomous supply chain disruption control agent built for modern manufacturing resilience. When supplier delays, tracking contradictions, or quality issues threaten production schedules, TRACE identifies risks, verifies claims against physical data, explores Pareto-optimal sourcing alternatives, and enforces budget & quality approval ratchets before committing changes to ERP.
 
-Built for **Hackers Occupied Pune 2026** by Team TRACE.
+Built for **Hackers Occupied Pune 2026** by Team devpulse.
 
 ---
 
